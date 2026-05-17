@@ -11,5 +11,5 @@ Windowed=1
 SoundVolume=5
 MusicVolume=5
 [CONNECTION SETTINGS]
-ServerIP=127.127.127.127
+ServerIP=127.0.0.1
 ServerPort=44406
