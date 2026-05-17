@@ -49,7 +49,7 @@ namespace CfgDefaults
     inline constexpr wchar_t CfgDefaultEncryptedUsername[] = L"";
     inline constexpr wchar_t CfgDefaultEncryptedPassword[] = L"";
 
-    inline constexpr wchar_t CfgDefaultServerIP[] = L"127.127.127.127";
+    inline constexpr wchar_t CfgDefaultServerIP[] = L"127.0.0.1";
     inline constexpr int CfgDefaultServerPort = 44406;
 
     inline constexpr int CfgDefaultZoom = 1735;  // OrbitalCamera DEFAULT_RADIUS — matches Default-cam camera-to-Hero distance
