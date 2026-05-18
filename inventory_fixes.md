@@ -246,3 +246,15 @@ Current behavior:
 - Hovered item tooltip remains the main tooltip.
 - Equipped item tooltip(s) render to the left of the hovered tooltip.
 - Tooltip frame coloring remains restored after the item-slot background experiment rollback.
+
+---
+
+## Follow-up: always-on equip-status background
+
+Implemented after the hover-only test:
+
+- Class/stat equip-status coloring now renders for every visible item in the inventory control, not only while hovering.
+- The logic stays scoped to player inventory and keeps tooltip frames normal.
+- The implementation is functionally acceptable, but the visual result is not final; the next experiment should try a red glow instead of a flat red/yellow background fill.
+
+Status: pushed as an intermediate visual iteration so it can be compared or reverted later.

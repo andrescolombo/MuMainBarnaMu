@@ -274,6 +274,7 @@ namespace SEASON3B
         //protected:
         void Render3D();
         void RenderNumberOfItem();
+        void RenderEquipStatusBackgrounds();
         void RenderItemToolTip();
     };
 }
