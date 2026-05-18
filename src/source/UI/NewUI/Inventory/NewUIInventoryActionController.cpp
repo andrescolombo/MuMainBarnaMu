@@ -254,11 +254,6 @@ bool CNewUIInventoryActionController::HandleSellToNPC(CNewUIInventoryCtrl* targe
 
 bool CNewUIInventoryActionController::HandleInventoryRightClickActions(CNewUIInventoryCtrl* targetControl) const
 {
-    if (g_pNewUISystem->IsVisible(INTERFACE_INVENTORY_EXT))
-    {
-        return TryTransferBetweenInventorySections(targetControl);
-    }
-
     ITEM* pItem = targetControl->FindItemAtPt(MouseX, MouseY);
     if (pItem == nullptr)
     {
@@ -299,6 +294,11 @@ bool CNewUIInventoryActionController::HandleInventoryRightClickActions(CNewUIInv
         {
             return true;
         }
+    }
+
+    if (g_pNewUISystem->IsVisible(INTERFACE_INVENTORY_EXT))
+    {
+        return TryTransferBetweenInventorySections(targetControl);
     }
 
     if (TryDropItem(targetControl, pItem))
