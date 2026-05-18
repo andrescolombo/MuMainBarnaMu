@@ -2245,7 +2245,7 @@ void SetTooltipFrameColor(TOOLTIP_FRAME_COLOR color)
     g_tooltipFrameColor = color;
 }
 
-void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bItemTextListBoxUse, ITEM* pCompareEquipped, bool bAnchorLeft, float* pOutWidth)
+void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bItemTextListBoxUse, ITEM* pCompareEquipped, ITEM* pSecondCompareEquipped, bool bAnchorLeft, float* pOutWidth)
 {
     if (ip->Type == -1)
         return;
@@ -5800,13 +5800,16 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 
         int nInvenHeight = p->Height * INVENTORY_SCALE;
 
-        sy += INVENTORY_SCALE;
-        if (sy + Height > iScreenHeight)
+        if (!bAnchorLeft)
         {
-            sy += iScreenHeight - (sy + Height);
-        }
-        else if (sy + Height > iScreenHeight)
-        {
+            sy += INVENTORY_SCALE;
+            if (sy + Height > iScreenHeight)
+            {
+                sy += iScreenHeight - (sy + Height);
+            }
+            else if (sy + Height > iScreenHeight)
+            {
+            }
         }
     }
 
@@ -5823,12 +5826,17 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 
     if (pCompareEquipped != nullptr && pCompareEquipped->Type != -1 && !bAnchorLeft)
     {
-        // Measure the equipped tooltip width before rendering anything
-        float equippedWidth = 0.f;
-        RenderItemInfo(0, sy, pCompareEquipped, Sell, Inventype, bItemTextListBoxUse, nullptr, true, &equippedWidth);
-
-        // Render main tooltip
+        // Render main tooltip before compare measurement overwrites TextList.
         RenderTipTextListAtLeft(tipLeft, sy, TextNum, 0);
+
+        float equippedWidth = 0.f;
+        RenderItemInfo(0, sy, pCompareEquipped, Sell, Inventype, bItemTextListBoxUse, nullptr, nullptr, true, &equippedWidth);
+
+        float secondEquippedWidth = 0.f;
+        if (pSecondCompareEquipped != nullptr && pSecondCompareEquipped->Type != -1)
+        {
+            RenderItemInfo(0, sy, pSecondCompareEquipped, Sell, Inventype, bItemTextListBoxUse, nullptr, nullptr, true, &secondEquippedWidth);
+        }
 
         // Reset frame color so the compare tooltip gets a normal border
         g_tooltipFrameColor = TOOLTIP_FRAME_NORMAL;
@@ -5836,7 +5844,13 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 
         // Render compare tooltip to the LEFT of the main tooltip
         const int equippedLeft = tipLeft - static_cast<int>(equippedWidth) - kCompareTooltipGap;
-        RenderItemInfo(equippedLeft, sy, pCompareEquipped, Sell, Inventype, bItemTextListBoxUse, nullptr, true);
+        RenderItemInfo(equippedLeft, sy, pCompareEquipped, Sell, Inventype, bItemTextListBoxUse, nullptr, nullptr, true);
+
+        if (pSecondCompareEquipped != nullptr && pSecondCompareEquipped->Type != -1)
+        {
+            const int secondEquippedLeft = equippedLeft - static_cast<int>(secondEquippedWidth) - kCompareTooltipGap;
+            RenderItemInfo(secondEquippedLeft, sy, pSecondCompareEquipped, Sell, Inventype, bItemTextListBoxUse, nullptr, nullptr, true);
+        }
     }
     else
     {

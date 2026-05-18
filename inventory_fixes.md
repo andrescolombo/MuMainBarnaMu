@@ -200,3 +200,49 @@ vec3_t arv3PosProcess[4];   // valid indices: 0, 1, 2, 3
 6. Hover item while equipment slot is **empty** → single tooltip, appropriate frame color.
 7. Hover **potion / jewel** → single tooltip, no frame coloring.
 8. Hover item in vault / trade / shop → no compare, no frame coloring.
+
+---
+
+## Rollback note: item-slot background experiment
+
+Requested follow-up: move the class/stat warning color from the tooltip frame to the inventory item background/frame itself.
+
+Attempted approach:
+
+- Added a helper in `NewUIInventoryCtrl.cpp` to choose the slot background color during `CNewUIInventoryCtrl::Render`.
+- Red slot background for `EquipStatus::ClassMismatch`.
+- Yellow slot background for `EquipStatus::StatInsufficient`.
+- Removed the `SetTooltipFrameColor(...)` calls from `RenderItemToolTip`.
+
+Result:
+
+- The edit compiled.
+- The client no longer loaded/reached the server screen.
+- The experiment was rolled back.
+
+Current state after rollback:
+
+- Tooltip frame coloring is restored:
+  - red tooltip frame for class mismatch
+  - yellow tooltip frame for insufficient stats
+- Inventory item background rendering is back to the previous durability/trade-warning behavior.
+
+Next attempt should avoid adding equip-status evaluation directly inside the per-square inventory render path until the startup/server-screen failure is understood.
+
+---
+
+## Follow-up: equipped compare tooltip progress
+
+Implemented next steps:
+
+- Compare tooltips now stay aligned to the same top Y position as the hovered item tooltip.
+- Hovered inventory items can compare against up to two equipped items when the target item type supports paired slots:
+  - right-hand and left-hand weapon slots
+  - right-ring and left-ring slots
+- The hovered tooltip is rendered before compare tooltip measurement, preventing the shared `TextList` buffer from being overwritten by the equipped item. This fixes the case where hovering a sword while an axe is equipped showed axe text in both tooltip boxes.
+
+Current behavior:
+
+- Hovered item tooltip remains the main tooltip.
+- Equipped item tooltip(s) render to the left of the hovered tooltip.
+- Tooltip frame coloring remains restored after the item-slot background experiment rollback.
