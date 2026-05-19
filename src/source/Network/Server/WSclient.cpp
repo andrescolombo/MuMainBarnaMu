@@ -2547,7 +2547,7 @@ void ReceiveCreatePlayerViewportExtended(std::span<const BYTE> ReceiveBuffer)
     c->Skin = 0;
     c->AttackSpeed = Data->AttackSpeed;
     c->MagicSpeed = Data->MagicSpeed;
-    c->PK = Data->RotationAndHeroState & 0xf;
+    c->PK = 0; // Default to neutral on viewport creation to prevent temporary PK=3 friendly fire bug
     c->Object.Angle[2] = ((float)(Data->RotationAndHeroState >> 4) - 1.f) * 45.f;
     o->Kind = KIND_PLAYER;
     o->Type = MODEL_PLAYER;
