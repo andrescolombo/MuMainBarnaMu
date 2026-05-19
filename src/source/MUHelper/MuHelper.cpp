@@ -854,7 +854,13 @@ namespace MUHelper
 
     int CMuHelper::SimulateSkill(ActionSkillType iSkill, bool bTargetRequired, int iTarget)
     {
-        g_MovementSkill.m_iSkill = iSkill;
+        const int iSkillIndex = g_pSkillList->GetSkillIndex(iSkill);
+        if (iSkillIndex == -1)
+        {
+            return 0;
+        }
+
+        g_MovementSkill.m_iSkill = iSkillIndex;
         g_MovementSkill.m_bMagic = true;
 
         const float fSkillDistance = gSkillManager.GetSkillDistance(iSkill, Hero);
