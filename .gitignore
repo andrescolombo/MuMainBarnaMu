@@ -43,5 +43,16 @@ build-mingw/
 docs/reviews/
 
 # graphify (https://github.com/safishamsi/graphify)
-graphify-out/manifest.json
-graphify-out/cost.json
+graphify-out/
+
+# AI/editor local workspaces
+.claude/
+.cursor/
+
+# Common local caches/temp artifacts
+*.tmp
+*.temp
+*.cache
+
+# Local archive for non-essential working files
+_local/
