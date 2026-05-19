@@ -1,5 +1,23 @@
 # Changelog
 
+## Change Index
+
+1. `f27e4718` - Configure local server defaults
+2. `94ec2b9b` - Inventory tooltip comparison + RMB equip fix
+3. `4c77a87f` - Fix equipped-item tooltip comparisons
+4. `0a43333b` - Show inventory equip-status backgrounds
+5. `a062845f` - Dim equip-status backgrounds
+6. `38508767` - Try inventory rearrange button
+7. `5bbcbf9c` - Compute inventory arrange plan
+8. `fc9b8b1a` - Keep arrange item keys in sync
+9. `e4a932dd` - Support wing size in inventory arrange
+10. `3f4f3062` - Correct minimap click movement direction
+11. `9b21610f` - Minimap click movement + docs update
+12. `b2039e99` - Spawn markers, Mu Helper hotkeys, arrange expansion
+13. `4ebe0c3d` - Admin minimap right-click teleport
+14. `b63a3f3a` - Area-skill PvP desync fix + diagnostics
+15. `8f85fd3e` - Triple Shot switch break + spawn PK init fix
+16. `5582c064` - Repo cleanup for essential tracked files
 ## Unreleased
 
 - Elf and Summoner area skills now require CTRL like every other class (`src/source/Engine/Object/ZzzInterface.cpp`, marker `[BUG_CTRL_PVP]`):
@@ -49,3 +67,69 @@
   - Yellow slot background still marks items with missing stat requirements.
   - Overlay alpha was reduced from `0.45f` to `0.12f` to make the color much less saturated.
   - Changed lines: `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp:23`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp:176`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp:180`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp:185`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp:1701`.
+
+### Commit-by-commit summary (since `origin/main`)
+
+1. `f27e4718` (2026-05-18) - Configure local server defaults
+   - Added local setup guidance (`REQUIREMENTS.md`) and updated client defaults/config constants for local server connectivity.
+   - Files: `REQUIREMENTS.md`, `src/bin/config.ini.template`, `src/source/Data/GameConfig/GameConfigConstants.h`, `src/source/Scenes/SceneCore.cpp`.
+
+2. `94ec2b9b` (2026-05-18) - Inventory tooltip comparison + RMB equip fix
+   - Added side-by-side equip tooltip comparison behavior and fixed right-click equip flow.
+   - Files: `.gitignore`, `inventory_fixes.md`, `report.md`, `src/CMakeLists.txt`, `src/source/Engine/Object/ZzzInfomation.cpp`, `src/source/Engine/Object/ZzzInventory.cpp`, `src/source/Engine/Object/ZzzInventory.h`, `src/source/Render/Effects/ZzzEffect.cpp`, `src/source/UI/NewUI/Inventory/NewUIInventoryActionController.cpp`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp`.
+
+3. `4c77a87f` (2026-05-18) - Fix equipped-item tooltip comparisons
+   - Corrected comparison logic/details for equipped inventory tooltips.
+   - Files: `inventory_fixes.md`, `src/source/Engine/Object/ZzzInventory.cpp`, `src/source/Engine/Object/ZzzInventory.h`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp`.
+
+4. `0a43333b` (2026-05-18) - Show inventory equip-status backgrounds
+   - Added visual slot state overlays to indicate equipment usability/status.
+   - Files: `inventory_fixes.md`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.h`.
+
+5. `a062845f` (2026-05-18) - Dim equip-status backgrounds
+   - Reduced overlay intensity/alpha for clearer item readability.
+   - Files: `CHANGELOG.md`, `src/source/UI/NewUI/Inventory/NewUIInventoryCtrl.cpp`.
+
+6. `38508767` (2026-05-19) - Try inventory rearrange button
+   - Added initial UI entry point/button wiring for experimental inventory rearrange.
+   - Files: `CHANGELOG.md`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.cpp`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.h`.
+
+7. `5bbcbf9c` (2026-05-19) - Compute inventory arrange plan
+   - Implemented arrangement planning logic for packing items before applying moves.
+   - Files: `CHANGELOG.md`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.cpp`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.h`.
+
+8. `fc9b8b1a` (2026-05-19) - Keep arrange item keys in sync
+   - Fixed client-side key synchronization after rearrange moves.
+   - Files: `CHANGELOG.md`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.cpp`.
+
+9. `e4a932dd` (2026-05-19) - Support wing size in inventory arrange
+   - Extended arrange logic to handle wing dimensions correctly.
+   - Files: `CHANGELOG.md`, `inventory_fixes.md`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.cpp`.
+
+10. `3f4f3062` (2026-05-19) - Correct minimap click movement direction
+    - Fixed movement vector/direction handling for minimap click-to-move.
+    - Files: `src/source/UI/NewUI/HUD/NewUIMiniMap.cpp`.
+
+11. `9b21610f` (2026-05-19) - Minimap click movement + docs update
+    - Added minimap click movement functionality and documented map navigation behavior.
+    - Files: `.graphifyignore`, `AGENTS.md`, `LLM.md`, `docs/map_navigation_movement.md`, `src/source/UI/NewUI/HUD/NewUIMiniMap.cpp`, `src/source/UI/NewUI/HUD/NewUIMiniMap.h`.
+
+12. `b2039e99` (2026-05-19) - Spawn markers, Mu Helper hotkeys, arrange expansion
+    - Added minimap spawn markers, new Mu Helper hotkey behavior, and expanded arrange support coverage.
+    - Files: `CHANGELOG.md`, `HOTKEYS.md`, `TASKS.md`, `src/source/UI/NewUI/HUD/NewUIHotKey.cpp`, `src/source/UI/NewUI/HUD/NewUIMiniMap.cpp`, `src/source/UI/NewUI/HUD/NewUIMiniMap.h`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.cpp`.
+
+13. `4ebe0c3d` (2026-05-19) - Admin minimap right-click teleport
+    - Added GM/admin-only minimap right-click instant teleport support.
+    - Files: `CHANGELOG.md`, `src/source/UI/NewUI/HUD/NewUIMiniMap.cpp`.
+
+14. `b63a3f3a` (2026-05-19) - Area-skill PvP desync fix + diagnostics
+    - Fixed client-side area-skill PvP targeting desync behavior and added diagnostics/docs.
+    - Files: `BUG_CTRL_PVP.md`, `CHANGELOG.md`, `changes.md`, `docs/SERVER_FIX_BUG_CTRL_PVP.md`, `newui_Bt_arrange.ozt`, `newui_Bt_arrange.tga`, `newui_Bt_arrange_big.ozt`, `newui_Bt_arrange_big.tga`, `newui_Bt_mix.OZT`, `newui_repair_00.OZT`, `newui_repair_00.tga`, `skill_analysis.md`, `src/source/Engine/Object/ZzzInterface.cpp`, `src/source/Network/Server/WSclient.cpp`, `src/source/Render/Models/ZzzBMD.cpp`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.cpp`, `src/source/UI/NewUI/Inventory/NewUIMyInventory.h`, `src/source/UI/NewUI/NewUIMuHelper.cpp`.
+
+15. `8f85fd3e` (2026-05-19) - Triple Shot switch break + spawn PK init fix
+    - Fixed missing `break` in Triple Shot handling and initialized viewport spawn PK state.
+    - Files: `src/source/Engine/Object/ZzzCharacter.cpp`, `src/source/Network/Server/WSclient.cpp`.
+
+16. `5582c064` (2026-05-19) - Repo cleanup for essential tracked files
+    - Removed non-essential root-level analysis/assets from tracking and tightened ignore rules.
+    - Files: `.gitignore`, `BUG_CTRL_PVP.md`, `changes.md`, `inventory_fixes.md`, `newui_Bt_arrange.ozt`, `newui_Bt_arrange.tga`, `newui_Bt_arrange_big.ozt`, `newui_Bt_arrange_big.tga`, `newui_Bt_mix.OZT`, `newui_repair_00.OZT`, `newui_repair_00.tga`, `report.md`, `skill_analysis.md`.
