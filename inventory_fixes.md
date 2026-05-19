@@ -258,3 +258,143 @@ Implemented after the hover-only test:
 - The implementation is functionally acceptable, but the visual result is not final; the next experiment should try a red glow instead of a flat red/yellow background fill.
 
 Status: pushed as an intermediate visual iteration so it can be compared or reverted later.
+
+---
+
+## Follow-up: Arrange Items button logic
+
+This documents the current inventory arrange flow for future fixes.
+
+### Entry point
+
+The arrange button lives in `CNewUIMyInventory` and calls:
+
+```cpp
+RequestInventoryRearrange()
+```
+
+The button only starts arranging when `CanUseInventoryRearrange()` allows it:
+
+- inventory control exists
+- no item is currently picked by the cursor
+- no item move request is already in progress (`EquipmentItem == false`)
+- blocked interfaces are closed, including NPC shop, trade, storage, mix inventory, my shop,
+  lucky item windows, and purchase shop
+
+### Supported grid and item sizes
+
+The target grid is the main inventory grid, currently `8x8`.
+
+Supported item sizes:
+
+- `1x1`
+- `1x3`
+- `2x2`
+- `2x3`
+- `2x4`
+- `4x3`
+
+Items are never rotated. A `1x3` item remains width `1`, height `3`; a `2x4` item remains width `2`,
+height `4`; a wing-sized `4x3` item remains width `4`, height `3`.
+
+If any inventory item has an unsupported size, the arrange request is cancelled before moving
+anything.
+
+### Phase 1: compute the compact target layout
+
+`BuildInventoryRearrangeMoves()` first reads the current inventory items into a temporary planning
+list. The real inventory is not changed during this phase.
+
+Each planned item stores:
+
+- current source cell (`sourceX`, `sourceY`)
+- target cell (`targetX`, `targetY`)
+- item width and height
+- the current client item key, used as a temporary planning identity
+
+Target placement is deterministic:
+
+1. Sort items by descending area.
+2. Break ties by taller height first.
+3. Break ties by wider width first.
+4. Break remaining ties by item key.
+
+For each item, the planner scans every valid position and chooses the best placement. Wide items
+prefer columns aligned to their own width. Two-wide items pack naturally into columns `0-1`, `2-3`,
+`4-5`, and `6-7`; four-wide wings prefer `0-3` and `4-7` instead of drifting into offset gaps.
+
+The placement score then prefers:
+
+1. smaller occupied bottom edge
+2. smaller bounding area
+3. smaller right edge
+4. smaller row
+5. smaller column
+
+This creates one fixed compact layout before any real item move is sent.
+
+### Phase 2: generate a safe one-by-one move list
+
+`GenerateArrangeMoves()` simulates the inventory with a temporary occupancy grid. It does not mutate
+the real inventory.
+
+The move generator loops until every simulated item reaches its target:
+
+1. If an item's target rectangle is currently empty, queue a move directly to that target.
+2. If no direct target move is possible, find the item blocking another item's target.
+3. Move that blocker into a temporary empty rectangle.
+4. Repeat until all target positions are reachable.
+
+Temporary slots are searched from bottom-right toward top-left. The first pass avoids final target
+cells, which helps preserve the compact layout. If no such temporary slot exists, the second pass
+allows a currently empty target cell as a temporary buffer.
+
+A guard stops planning if the simulated move list grows beyond `itemCount * columnCount * rowCount`.
+If the full move sequence cannot be planned, the arrange request is cancelled before real movement
+starts.
+
+### Phase 3: execute through the normal server move path
+
+After a full valid move list exists, the client executes exactly one move at a time through the same
+path as manual item movement:
+
+1. Find the item for the front queued move.
+2. Create a picked item with `CNewUIInventoryCtrl::CreatePickedItem(...)`.
+3. Remove it locally from the inventory control.
+4. Send `SendRequestEquipmentItem(STORAGE_TYPE::INVENTORY, sourceIndex, pickedItem,
+   STORAGE_TYPE::INVENTORY, targetIndex)`.
+5. Wait for the server response before sending the next move.
+
+The server remains authoritative. If a move is rejected or the expected destination item cannot be
+found after the response, the arrange queue is cleared and no more automatic moves are sent.
+
+### Important identity detail
+
+The arrange system does not check item names for movement.
+
+The planner initially uses `ITEM::Key` because the inventory occupancy grid already stores keys.
+However, `ITEM::Key` is marked as client-only in `Core/Globals/_struct.h`, and `CreateItem(...)`
+generates a new key when the server response recreates the item in the destination slot.
+
+That caused the previous loop bug: after one successful move, queued moves could still point at the
+old client key and start following the wrong object.
+
+Current fix:
+
+1. After each accepted move, `ProcessInventoryRearrange()` reads the item now sitting at
+   `move.targetIndex`.
+2. It gets that item's new `ITEM::Key`.
+3. It replaces the old key in all remaining queued moves with the new key.
+
+This keeps the queued move list attached to the same logical item even though the client-side item
+object/key changes after every server-confirmed move.
+
+### Current behavior summary
+
+- One button click computes a final compact target layout first.
+- Real movement only starts after the full simulated move list is valid.
+- Items move one by one through normal server-authoritative item move requests.
+- The cursor-held item state is used as the movement buffer.
+- Temporary inventory slots are used only when a target position is blocked.
+- Item metadata is preserved because the server move path is reused; the arrange code does not
+  duplicate, recreate, or edit item stats/options/sockets directly.
