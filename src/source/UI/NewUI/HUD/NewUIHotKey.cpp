@@ -14,6 +14,7 @@
 #include "UI/Legacy/UIMng.h"
 #include "World/MapInfra/MapManager.h"
 #include "Character/CharacterManager.h"
+#include "MUHelper/MuHelper.h"
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "GameShop/InGameShopSystem.h"
 #endif // KJH_ADD_INGAMESHOP_UI_SYSTEM
@@ -339,6 +340,12 @@ bool SEASON3B::CNewUIHotKey::UpdateKeyEvent()
     else if (SEASON3B::IsPress('Z'))
     {
         g_pNewUISystem->Toggle(SEASON3B::INTERFACE_MUHELPER);
+        PlayBuffer(SOUND_CLICK01);
+        return false;
+    }
+    else if (SEASON3B::IsPress(VK_F8))
+    {
+        MUHelper::g_MuHelper.Toggle();
         PlayBuffer(SOUND_CLICK01);
         return false;
     }
