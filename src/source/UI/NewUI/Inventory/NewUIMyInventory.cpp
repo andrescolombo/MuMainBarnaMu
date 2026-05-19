@@ -43,7 +43,7 @@ namespace
 {
     constexpr int ARRANGE_BUTTON_X_OFFSET = 161;
     constexpr int ARRANGE_BUTTON_Y_OFFSET = 391;
-    constexpr int ARRANGE_BUTTON_WIDTH = 18;
+    constexpr int ARRANGE_BUTTON_WIDTH = 36;
     constexpr int ARRANGE_BUTTON_HEIGHT = 29;
 
     struct ArrangeItem
@@ -1687,7 +1687,7 @@ void CNewUIMyInventory::SetButtonInfo()
     m_BtnExpand.ChangeButtonInfo(m_Pos.x + 87 + 37, m_Pos.y + 391, 36, 29);
     m_BtnExpand.ChangeToolTipText(GlobalText[3322], true);
 
-    m_BtnArrange.ChangeButtonImgState(true, IMAGE_INVENTORY_EXPAND_BTN, false);
+    m_BtnArrange.ChangeButtonImgState(true, IMAGE_INVENTORY_ARRANGE_BTN, false);
     m_BtnArrange.ChangeButtonInfo(m_Pos.x + ARRANGE_BUTTON_X_OFFSET, m_Pos.y + ARRANGE_BUTTON_Y_OFFSET, ARRANGE_BUTTON_WIDTH, ARRANGE_BUTTON_HEIGHT);
     m_BtnArrange.ChangeToolTipText(L"Rearrange inventory", true);
 }
@@ -1715,6 +1715,7 @@ void CNewUIMyInventory::LoadImages() const
     LoadBitmap(L"Interface\\newui_exit_00.tga", IMAGE_INVENTORY_EXIT_BTN, GL_LINEAR);
     LoadBitmap(L"Interface\\newui_repair_00.tga", IMAGE_INVENTORY_REPAIR_BTN, GL_LINEAR);
     LoadBitmap(L"Interface\\newui_expansion_btn.tga", IMAGE_INVENTORY_EXPAND_BTN, GL_LINEAR);
+    LoadBitmap(L"Interface\\newui_Bt_arrange.tga", IMAGE_INVENTORY_ARRANGE_BTN, GL_LINEAR);
     LoadBitmap(L"Interface\\newui_Bt_openshop.tga", IMAGE_INVENTORY_MYSHOP_OPEN_BTN, GL_LINEAR);
     LoadBitmap(L"Interface\\newui_Bt_closeshop.tga", IMAGE_INVENTORY_MYSHOP_CLOSE_BTN, GL_LINEAR);
 }
@@ -1723,6 +1724,7 @@ void CNewUIMyInventory::UnloadImages()
 {
     DeleteBitmap(IMAGE_INVENTORY_MYSHOP_CLOSE_BTN);
     DeleteBitmap(IMAGE_INVENTORY_MYSHOP_OPEN_BTN);
+    DeleteBitmap(IMAGE_INVENTORY_ARRANGE_BTN);
     DeleteBitmap(IMAGE_INVENTORY_REPAIR_BTN);
     DeleteBitmap(IMAGE_INVENTORY_EXIT_BTN);
     DeleteBitmap(IMAGE_INVENTORY_MONEY);
