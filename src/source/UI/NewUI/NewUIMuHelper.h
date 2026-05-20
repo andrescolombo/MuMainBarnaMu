@@ -169,11 +169,17 @@ namespace SEASON3B
         void InitConfig();
         void SaveConfig();
         void ApplyConfig();
+        void ApplyRequestModeBoxStates();
+        void LoadRequestModesFromConfig();
+        void SaveRequestModesToConfig();
 
         void LoadImages();
         void UnloadImages();
 
         void ApplyConfigFromCheckbox(int iCheckboxId, bool bState);
+        void ApplyFriendRequestMode(int iCheckboxId);
+        void ApplyGuildRequestMode(int iCheckboxId);
+        void ApplyPartyRequestMode(int iCheckboxId);
         void ApplyConfigFromSkillSlot(int iSlot, int iSkill);
         void SaveExtraItem();
         void RemoveExtraItem();
@@ -201,6 +207,10 @@ namespace SEASON3B
         cTextureMap m_IconList;
         int m_iSelectedSkillSlot;
         std::array<int, MAX_SKILLS_SLOT> m_aiSelectedSkills;
+
+        BYTE m_byFriendRequestMode;
+        BYTE m_byGuildRequestMode;
+        BYTE m_byPartyRequestMode;
     };
 
     class CNewUIMuHelperSkillList : public CNewUIObj

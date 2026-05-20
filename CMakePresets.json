@@ -82,49 +82,57 @@
       "name": "windows-x86-debug",
       "displayName": "x86 Debug",
       "configurePreset": "windows-x86",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 8
     },
     {
       "name": "windows-x86-release",
       "displayName": "x86 Release",
       "configurePreset": "windows-x86",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 8
     },
     {
       "name": "windows-x86-mueditor-debug",
       "displayName": "x86 MuEditor Debug",
       "configurePreset": "windows-x86-mueditor",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 8
     },
     {
       "name": "windows-x86-mueditor-release",
       "displayName": "x86 MuEditor Release",
       "configurePreset": "windows-x86-mueditor",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 8
     },
     {
       "name": "windows-x64-debug",
       "displayName": "x64 Debug",
       "configurePreset": "windows-x64",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 8
     },
     {
       "name": "windows-x64-release",
       "displayName": "x64 Release",
       "configurePreset": "windows-x64",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 8
     },
     {
       "name": "windows-x64-mueditor-debug",
       "displayName": "x64 MuEditor Debug",
       "configurePreset": "windows-x64-mueditor",
-      "configuration": "Debug"
+      "configuration": "Debug",
+      "jobs": 8
     },
     {
       "name": "windows-x64-mueditor-release",
       "displayName": "x64 MuEditor Release",
       "configurePreset": "windows-x64-mueditor",
-      "configuration": "Release"
+      "configuration": "Release",
+      "jobs": 8
     }
   ]
 }

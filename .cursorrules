@@ -1,0 +1,35 @@
+# MU Online S6 Client — Cursor Rules
+
+## 1. CRITICAL CONSTRAINTS (NO EXCEPTIONS)
+* **DO NOT BUILD**: AI must NOT run any build/test commands (cmake, ctest, dotnet). User compiles manually.
+* **DO NOT PUSH**: AI must NEVER run `git push`. The user handles remote pushes manually (all pushes need to go to https://github.com/andrescolombo/BarnaMuClient).
+* **ASK IF UNSURE**: If the AI has any ambiguity, doubts, or is not 100% sure about requirements or design decisions, it **MUST** stop and ask clarifying questions instead of guessing.
+
+## 2. DIRECTORY & SYSTEM MAP
+| System Aspect | Target Code Paths | Docs Reference | Architecture / Math Notes |
+| :--- | :--- | :--- | :--- |
+| **3D Camera & Zoom** | `src/source/Camera/` (`CameraConfig.h`, `OrbitalCamera.cpp`, `DefaultCamera.cpp`) | `docs/camera-system.md`<br>`docs/options-window.md` | Zoom lock (**F10**); reset (**F11**); orbital zoom saved to `config.ini` under `[Camera]`. 8 Default zoom rungs. |
+| **DevEditor (ImGui)** | `src/MuEditor/` (`Core/`, `UI/DevEditor/DevEditorUI.cpp`) | `docs/dev-editor.md` | Editor runs on `_EDITOR` build. Toggle via **F12** or `--editor`. Tuning panels/debug-culling. |
+| **i18n & Translation** | `src/Translation/` (`i18n.h`/`i18n.cpp`) & `src/bin/Translations/` | `TRANSLATION_SYSTEM_INTEGRATION.md` | Game (always), Editor & Metadata (debug `#ifdef _EDITOR`) domains. Macros: `GAME_TEXT`, `EDITOR_TEXT`, `META_TEXT`. |
+| **Minimap & Navigation**| `src/source/UI/NewUI/HUD/NewUIMiniMap.cpp`, `Engine/Object/ZzzInterface.cpp` (`MoveHero`), `Engine/AI/ZzzAI.cpp` (`PathFinding2`) | `docs/map_navigation_movement.md`<br>`TASKS.md` | Un-rotate clicks by -45°. Grid: `TERRAIN_SCALE = 100.f`. GMs (`CtlCode` operator/GM effect) right-click to teleport. |
+| **Inventory & Items** | `Engine/Object/ZzzInventory.cpp`, `UI/NewUI/Inventory/` (`NewUIInventoryCtrl.cpp`, `NewUIMyInventory.cpp`) | `LLM.md` §3.A<br>`CHANGELOG.md` | Side-by-side tooltips; equip overlay colors dimmed to alpha `0.12f`. Rearrange supports 1x1 to 4x4 in 8x8 layouts. |
+| **Network & Interop** | `src/source/Network/Server/WSclient.cpp`, `ClientLibrary/` (C# .NET 10), `Dotnet/PacketFunctions_ClientToServer.cpp` | `docs/SERVER_FIX_BUG_CTRL_PVP.md` | Native AOT interop C++ bindings. PvP desync client workaround snapshots guild/Gens/PK on extended viewport `0x12`. |
+| **Gameplay & Skills** | `src/source/GameLogic/`, `Engine/Object/ZzzInterface.cpp` (`AttackElf`/`AttackWizard`) | `CHANGELOG.md` (Unreleased) | Elf Triple/Multi, Summoner Lightning gate target with `CheckAttack()` to enforce PvP safety rules (require **CTRL**). |
+| **Global Memory & SFX**| `src/source/Core/Globals/` (`_struct.h`, `_enum.h`, `_define.h`), `src/source/Audio/` | `LLM.md` §4 | Core structs: `ITEM`, `OBJECT`. UTF-16LE in-memory; UTF-8 files/net. SFX copied next to execution `/Data/Sound/`. |
+
+## 3. STRICT CODING RULES (from `docs/CODING_RULES.md`)
+1. **Short Functions**: Max 40 lines. Extract logical blocks on touch.
+2. **Exit Early**: Put guard conditions at the top (`if (bad) return;`). Avoid deep nesting.
+3. **No Magic Numbers**: Give numbers, colors, times named constants (`constexpr` / `const` / `enum`).
+4. **Layer Separation**: Maintain hard boundary: Rendering ↔ Logic ↔ UI ↔ Data ↔ Network ↔ Input.
+5. **One Class Per File**: Separate C++ `.h`/`.cpp`. Single public type per C# `.cs`.
+6. **Sub-namespaces**: Extracted free functions live in `namespace Layer::Concern[::SubConcern]`. No `NewUI` file prefix on new files.
+7. **No Leaks**: Use C++ RAII / smart pointers. Implement C# `IDisposable`.
+8. **Readable > Clever**: Break complex math/logic into intermediate variables.
+9. **Document Formulas**: Add usage-level documentation for game/business logic and formulas inside `.md` files.
+10. **Hot Path Performance (Called Per-Frame)**:
+    * **NO heap allocations** (never construct `std::vector`, `std::string`, or use `new` in loops). Use stack or pooled caches.
+    * **NO I/O operations** or **string formatting** inside hot loops.
+
+## 4. UI/UX HOTKEYS (from `HOTKEYS.md`)
+* `Esc` (Menu), `Tab` (Minimap), `M` (Map Move), `I`/`V` (Inventory), `Z` (Helper Panel), `F8` (Helper Toggle), `F9` (Cycle Camera), `F10` (Zoom Lock), `F11` (Reset Camera), `F12` (DevEditor Toggle), `Space` (Auto-pickup).
