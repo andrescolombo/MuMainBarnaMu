@@ -1,0 +1,18 @@
+# Ignore large third-party/vendor libraries from AI indexing
+src/ThirdParty/
+
+# Ignore local build outputs
+out/
+build/
+build-mingw/
+_deps/
+**/bin/
+**/obj/
+
+# Ignore IDE configs and cache
+.vs/
+.idea/
+.git/
+.cursor/
+.claude/
+graphify-out/

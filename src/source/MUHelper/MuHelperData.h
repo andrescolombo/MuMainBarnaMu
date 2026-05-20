@@ -50,6 +50,13 @@ namespace MUHelper
 		PET_ATTACK_TOGETHER = 0x02
 	};
 
+	enum ERequestHandlingMode : BYTE
+	{
+		REQUEST_HANDLING_SHOW = 0x00,
+		REQUEST_HANDLING_BLOCK = 0x01,
+		REQUEST_HANDLING_AUTO = 0x02
+	};
+
 	typedef struct _PetAttackConfig
 	{
 		int iHuntingRange = 0;
@@ -96,8 +103,6 @@ namespace MUHelper
 		std::set<std::wstring> aExtraItems;
 
 		bool bUseSelfDefense = false;
-		bool bAutoAcceptFriend = false;
-		bool bAutoAcceptGuild = false;
 	} ConfigData;
 
 	class ConfigDataSerDe {

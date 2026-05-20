@@ -1,0 +1,19 @@
+# AI Agent Guidelines (.clinerules)
+
+This file applies to all autonomous or agentic coding assistants (using Claude, GPT, or Gemini) working in this repository.
+
+## 1. CRITICAL CONSTRAINTS (NO EXCEPTIONS)
+* **DO NOT BUILD**: AI must **NEVER** run any build, compile, or configuration commands (e.g., `cmake`, `msbuild`, `dotnet`, `make`). The user handles all compilation manually.
+* **DO NOT TEST**: AI must **NEVER** run any automated testing suites (e.g., `ctest`, `dotnet test`).
+* **DO NOT PUSH**: AI must **NEVER** run `git push`. All remote operations are handled by the user.
+* **ASK IF UNSURE**: If there is any ambiguity, doubt, or missing requirements, the AI must stop and ask clarifying questions instead of guessing.
+
+## 2. CODE STYLE & ARCHITECTURE RULES
+- **Exit Early**: Place guard conditions at the top of C++ and C# functions (`if (bad) return;`). Avoid deep nesting.
+- **Short Functions**: Keep functions short (max 40 lines). Extract logical blocks on touch.
+- **No Magic Numbers**: Give numbers, colors, times, and array offsets descriptive named constants (`constexpr` / `const` / `enum`).
+- **No Heap Allocations in Hot Paths**: Inside rendering loops or per-frame character updates, do NOT allocate memory on the heap (avoid constructing `std::vector`, `std::string`, or using `new`).
+- **One Class per File**: Separate C++ classes into matching `.h`/`.cpp` files. Keep one public type per C# file.
+
+## 3. CORE REFERENCES
+- Refer to [AGENTS.md](file:///c:/Users/Andres/MuMain/MuMain/AGENTS.md), [LLM.md](file:///c:/Users/Andres/MuMain/MuMain/LLM.md), and [docs/CODING_RULES.md](file:///c:/Users/Andres/MuMain/MuMain/docs/CODING_RULES.md) for full architecture, directory mappings, and styling rules.
