@@ -56,3 +56,8 @@ graphify-out/
 
 # Local archive for non-essential working files
 _local/
+
+# Local environment variables
+.env
+
+client_exports/
