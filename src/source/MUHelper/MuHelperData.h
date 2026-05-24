@@ -103,6 +103,8 @@ namespace MUHelper
 		std::set<std::wstring> aExtraItems;
 
 		bool bUseSelfDefense = false;
+
+		bool bFallbackBasicAttack = true;
 	} ConfigData;
 
 	class ConfigDataSerDe {
