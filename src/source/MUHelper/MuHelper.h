@@ -62,6 +62,7 @@ namespace MUHelper
 		int SimulateAttack(ActionSkillType iSkill);
 		int SimulateSkill(ActionSkillType iSkill, bool bTargetRequired, int iTarget);
 		int SimulateBuffSkill(ActionSkillType iSkill, int iTarget);
+		int SimulateBasicAttack(int iTarget);
 		int SimulateComboAttack();
 		int GetNearestTarget(ActionSkillType iSkill);
 		bool IsTargetInSkillRange(int iTargetId, ActionSkillType iSkill);
@@ -78,6 +79,7 @@ namespace MUHelper
 		bool HasAssignedBuffSkill();
 		bool IsSelfPositionSkill(ActionSkillType iSkill);
 		int SimulateBasicAttack();
+		bool IsMonsterOnTile(int iTileX, int iTileY);
 
 	private:
 		ConfigData m_config;
@@ -87,6 +89,9 @@ namespace MUHelper
 		std::set<int> m_setTargetsAttacking;
 		std::set<int> m_setItems;
 		int m_iCurrentItem;
+		int m_iLastObtainItem;
+		int m_iObtainStuckTicks;
+		std::set<int> m_setSkippedItems;
 		int m_iCurrentTarget;
 		int m_iCurrentBuffIndex;
 		int m_iCurrentBuffPartyIndex;

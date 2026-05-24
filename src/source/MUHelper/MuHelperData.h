@@ -114,6 +114,8 @@ namespace MUHelper
 
 		// Party request handling mode (EPartyRequestMode)
 		int iPartyRequestMode = PARTY_REQUEST_NORMAL;
+
+		bool bFallbackBasicAttack = true;
 	} ConfigData;
 
 	class ConfigDataSerDe {

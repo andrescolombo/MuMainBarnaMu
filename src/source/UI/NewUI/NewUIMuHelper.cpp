@@ -55,9 +55,9 @@ enum ECheckBoxId: uint16_t
 
     // Other Settings tab — party request mode (radio group)
     CHECKBOX_ID_PARTY_REQUEST_NORMAL,
-    CHECKBOX_ID_PARTY_REQUEST_AUTO,
     CHECKBOX_ID_PARTY_REQUEST_OFF,
     CHECKBOX_ID_OFFLEVEL,
+    CHECKBOX_ID_FALLBACK_BASIC_ATTACK
 };
 
 enum EButtonId : uint16_t
@@ -157,6 +157,7 @@ constexpr int FRIEND_REQUEST_MODE_Y = 80;
 constexpr int GUILD_REQUEST_MODE_Y = 97;
 constexpr int PARTY_REQUEST_MODE_Y = 114;
 constexpr int SELF_DEFENSE_Y = 142;
+constexpr int FALLBACK_BASIC_ATTACK_Y = 159;
 constexpr int TEXT_ID_FRIEND_REQUEST_MODE = 13;
 constexpr int TEXT_ID_GUILD_REQUEST_MODE = 14;
 constexpr int TEXT_ID_PARTY_REQUEST_MODE = 15;
@@ -375,6 +376,7 @@ void CNewUIMuHelper::InitCheckBox()
     InsertCheckBox(IMAGE_MACROUI_HELPER_OPTIONBUTTON, m_Pos.x + REQUEST_MODE_OFF_X, m_Pos.y + PARTY_REQUEST_MODE_Y, 15, 15, 0, REQUEST_MODE_BLOCK_LABEL, CHECKBOX_ID_PARTY_REQUEST_BLOCK, 2);
     InsertCheckBox(IMAGE_MACROUI_HELPER_OPTIONBUTTON, m_Pos.x + REQUEST_MODE_AUTO_X, m_Pos.y + PARTY_REQUEST_MODE_Y, 15, 15, 0, REQUEST_MODE_AUTO_LABEL, CHECKBOX_ID_PARTY_REQUEST_AUTO, 2);
     InsertCheckBox(IMAGE_CHECKBOX_BTN, m_Pos.x + 18, m_Pos.y + SELF_DEFENSE_Y, 15, 15, 0, GlobalText[3593], CHECKBOX_ID_AUTO_DEFEND, 2);
+    InsertCheckBox(IMAGE_CHECKBOX_BTN, m_Pos.x + 18, m_Pos.y + FALLBACK_BASIC_ATTACK_Y, 15, 15, 0, L"Basic Attack Fallback", CHECKBOX_ID_FALLBACK_BASIC_ATTACK, 2);
 
     // Party Request mode (other settings tab) — radio-style option buttons
     InsertCheckBox(IMAGE_MACROUI_HELPER_OPTIONBUTTON, m_Pos.x + 18, m_Pos.y + 155, 15, 15, 0, L"Party Req: On",   CHECKBOX_ID_PARTY_REQUEST_NORMAL, 2);
@@ -398,6 +400,7 @@ void CNewUIMuHelper::InitCheckBox()
     RegisterBoxCharacter(0xFF, CHECKBOX_ID_FRIEND_REQUEST_BLOCK);
     RegisterBoxCharacter(0xFF, CHECKBOX_ID_FRIEND_REQUEST_AUTO);
     RegisterBoxCharacter(0xFF, CHECKBOX_ID_AUTO_DEFEND);
+    RegisterBoxCharacter(0xFF, CHECKBOX_ID_FALLBACK_BASIC_ATTACK);
     RegisterBoxCharacter(0xFF, CHECKBOX_ID_GUILD_REQUEST_SHOW);
     RegisterBoxCharacter(0xFF, CHECKBOX_ID_GUILD_REQUEST_BLOCK);
     RegisterBoxCharacter(0xFF, CHECKBOX_ID_GUILD_REQUEST_AUTO);
@@ -1013,10 +1016,6 @@ void CNewUIMuHelper::ApplyConfigFromCheckbox(int iCheckboxId, bool bState)
         _TempConfig.iPartyRequestMode = MUHelper::PARTY_REQUEST_NORMAL;
         break;
 
-    case CHECKBOX_ID_PARTY_REQUEST_AUTO:
-        _TempConfig.iPartyRequestMode = MUHelper::PARTY_REQUEST_AUTO;
-        break;
-
     case CHECKBOX_ID_PARTY_REQUEST_OFF:
         _TempConfig.iPartyRequestMode = MUHelper::PARTY_REQUEST_OFF;
         break;
@@ -1034,6 +1033,10 @@ void CNewUIMuHelper::ApplyConfigFromCheckbox(int iCheckboxId, bool bState)
         {
             SendOfflevelCommand();
         }
+        break;
+
+    case CHECKBOX_ID_FALLBACK_BASIC_ATTACK:
+        _TempConfig.bFallbackBasicAttack = bState;
         break;
 
     default:
@@ -1137,6 +1140,8 @@ void CNewUIMuHelper::Reset()
     _TempConfig.bPickAncient = false;
     _TempConfig.bPickExtraItems = false;
     _TempConfig.aExtraItems.clear();
+
+    _TempConfig.bFallbackBasicAttack = true;
     m_byFriendRequestMode = REQUEST_HANDLING_SHOW;
     m_byGuildRequestMode = REQUEST_HANDLING_SHOW;
     m_byPartyRequestMode = REQUEST_HANDLING_SHOW;
@@ -1205,6 +1210,7 @@ void CNewUIMuHelper::ApplyConfig()
 
     ApplyRequestModeBoxStates();
     m_CheckBoxList[CHECKBOX_ID_AUTO_DEFEND].box->RegisterBoxState(_TempConfig.bUseSelfDefense);
+    m_CheckBoxList[CHECKBOX_ID_FALLBACK_BASIC_ATTACK].box->RegisterBoxState(_TempConfig.bFallbackBasicAttack);
 
     m_CheckBoxList[CHECKBOX_ID_OFFLEVEL].box->RegisterBoxState(IsOfflevelVipVisible() && _TempConfig.bOfflevel);
 

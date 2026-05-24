@@ -10,6 +10,7 @@
 #include "Engine/Object/ZzzInterface.h"
 #include "UI/NewUI/NewUISystem.h"
 #include "Core/Utilities/Log/muConsoleDebug.h"
+#include "Character/CharacterManager.h"
 #include "GameLogic/Skills/SkillManager.h"
 #include "GameLogic/Social/PartyManager.h"
 #include "World/MapInfra/MapManager.h"
@@ -160,6 +161,13 @@ namespace MUHelper
         m_iCurrentTarget = -1;
         m_iCurrentSkill = (ActionSkillType)m_config.aiSkill[0];
         m_iCurrentItem = MAX_ITEMS;
+        m_iLastObtainItem = MAX_ITEMS;
+        m_iObtainStuckTicks = 0;
+        m_setSkippedItems.clear();
+        m_posOriginal = { Hero->PositionX, Hero->PositionY };
+
+        m_iHuntingDistance = ComputeDistanceByRange(m_config.iHuntingRange);
+        m_iObtainingDistance = ComputeDistanceByRange(m_config.iObtainingRange);
 
         m_iSecondsElapsed = 0;
         m_iElapsedMilliseconds = 0;
@@ -297,6 +305,10 @@ namespace MUHelper
         {
             m_iCurrentTarget = -1;
         }
+
+        // Killing/losing a mob may have freed a previously-blocked drop tile.
+        // Re-arm the skip-set so ObtainItem gets another shot at it.
+        m_setSkippedItems.clear();
     }
 
     void CMuHelper::DeleteAllTargets()
@@ -938,7 +950,21 @@ namespace MUHelper
 
         if (m_iCurrentSkill > AT_SKILL_UNDEFINED)
         {
-            return SimulateAttack(m_iCurrentSkill);
+            const float fSkillDistance = gSkillManager.GetSkillDistance(m_iCurrentSkill, Hero);
+            if (CanExecuteSkill(Hero, m_iCurrentSkill, fSkillDistance))
+            {
+                return SimulateAttack(m_iCurrentSkill);
+            }
+        }
+
+        // Fallback: no skill configured (AT_SKILL_UNDEFINED) or selected skill
+        // cannot be cast right now (insufficient mana/stamina/requirements).
+        // Trigger the basic weapon/hand attack -- this does NOT go through the
+        // skill pipeline; it mimics what the main loop does when AutoAttack is
+        // on (Attacking=1, MovementType=MOVEMENT_ATTACK, Action()).
+        if (m_config.bFallbackBasicAttack)
+        {
+            return SimulateBasicAttack(m_iCurrentTarget);
         }
 
         return 1;
@@ -1278,6 +1304,123 @@ namespace MUHelper
         return (int)(iSkillResult == 1);
     }
 
+    int CMuHelper::SimulateBasicAttack(int iTarget)
+    {
+        if (iTarget == -1)
+        {
+            return 0;
+        }
+
+        const int iCharIndex = FindCharacterIndex(iTarget);
+        if (iCharIndex == MAX_CHARACTERS_CLIENT)
+        {
+            DeleteTarget(iTarget);
+            return 0;
+        }
+
+        CHARACTER* pTarget = &CharactersClient[iCharIndex];
+        if (pTarget->Dead > 0 || !IsMonster(pTarget))
+        {
+            DeleteTarget(iTarget);
+            return 0;
+        }
+
+        // Basic-attack reach (matches Action() / MOVEMENT_ATTACK ranges in
+        // ZzzInterface.cpp:3563-3579): default 1.8, spear 2.2, bow 6.0.
+        constexpr float BASIC_RANGE_DEFAULT = 1.8f;
+        constexpr float BASIC_RANGE_SPEAR = 2.2f;
+        constexpr float BASIC_RANGE_BOW = 6.0f;
+
+        float fRange = BASIC_RANGE_DEFAULT;
+        const int iWeaponRight = CharacterMachine->Equipment[EQUIPMENT_WEAPON_RIGHT].Type;
+        if (iWeaponRight >= ITEM_SPEAR && iWeaponRight < ITEM_SPEAR + MAX_ITEM_INDEX)
+        {
+            fRange = BASIC_RANGE_SPEAR;
+        }
+        if (gCharacterManager.GetEquipedBowType() != BOWTYPE_NONE)
+        {
+            fRange = BASIC_RANGE_BOW;
+        }
+
+        SelectedCharacter = iCharIndex;
+        TargetX = (int)(pTarget->Object.Position[0] / TERRAIN_SCALE);
+        TargetY = (int)(pTarget->Object.Position[1] / TERRAIN_SCALE);
+
+        PATH_t tempPath;
+        const bool bHasPath = PathFinding2(Hero->PositionX, Hero->PositionY, TargetX, TargetY, &tempPath, m_iHuntingDistance + fRange);
+        if (!bHasPath)
+        {
+            DeleteTarget(iTarget);
+            return 0;
+        }
+
+        const bool bTargetNear = CheckTile(Hero, &Hero->Object, fRange);
+        const bool bNoWall = CheckWall(Hero->PositionX, Hero->PositionY, TargetX, TargetY);
+
+        // Out of range or wall in the way -- walk a few steps closer this tick.
+        if (!bTargetNear || !bNoWall)
+        {
+            Hero->Path.Lock.lock();
+            const int pathNum = std::min<int>(tempPath.PathNum, 2);
+            for (int i = 0; i < pathNum; i++)
+            {
+                Hero->Path.PathX[i] = tempPath.PathX[i];
+                Hero->Path.PathY[i] = tempPath.PathY[i];
+            }
+            Hero->Path.PathNum = pathNum;
+            Hero->Path.CurrentPath = 0;
+            Hero->Path.CurrentPathFloat = 0;
+            Hero->Path.Lock.unlock();
+
+            SendMove(Hero, &Hero->Object);
+            return 0;
+        }
+
+        // In range -- replicate the main-loop basic-attack handoff
+        // (ZzzInterface.cpp:7966-8000). Action() with MOVEMENT_ATTACK sends
+        // the SendHitRequest packet and plays the swing animation.
+        Hero->MovementType = MOVEMENT_ATTACK;
+        ActionTarget = iCharIndex;
+        Attacking = 1;
+        Action(Hero, &Hero->Object, true);
+        return 1;
+    }
+
+    int CMuHelper::Regroup()
+    {
+        if (m_config.bReturnToOriginalPosition && m_iSecondsAway > m_config.iMaxSecondsAway)
+        {
+            if (!SimulateMove(m_posOriginal))
+            {
+                return 0;
+            }
+
+            m_iSecondsAway = 0;
+            m_iComboState = 0;
+            m_iCurrentTarget = -1;
+        }
+
+        return 1;
+    }
+
+    int CMuHelper::SimulateMove(POINT posMove)
+    {
+        Hero->MovementType = MOVEMENT_MOVE;
+        TargetX = (int)posMove.x;
+        TargetY = (int)posMove.y;
+
+        if (!CheckTile(Hero, &Hero->Object, 1.5f))
+        {
+            if (PathFinding2((Hero->PositionX), (Hero->PositionY), TargetX, TargetY, &Hero->Path))
+            {
+                SendMove(Hero, &Hero->Object);
+            }
+            return 0;
+        }
+
+        return 1;
+    }
+
     bool CMuHelper::HasAssignedBuffSkill()
     {
         for (int i = 0; i < m_config.aiBuff.size(); i++)
@@ -1348,13 +1491,25 @@ namespace MUHelper
 
     int CMuHelper::ObtainItem()
     {
+        // Stuck-on-pickup recovery (helper used to idle forever while a mob
+        // stood on the drop). WorkLoop ticks at ~5 Hz so 15 ticks ~= 3s.
+        constexpr int MAX_OBTAIN_STUCK_TICKS = 15;
+
         if (m_iCurrentItem == MAX_ITEMS)
         {
             m_iCurrentItem = SelectItemToObtain();
             if (m_iCurrentItem == MAX_ITEMS)
             {
+                m_iLastObtainItem = MAX_ITEMS;
+                m_iObtainStuckTicks = 0;
                 return 1;
             }
+        }
+
+        if (m_iCurrentItem != m_iLastObtainItem)
+        {
+            m_iLastObtainItem = m_iCurrentItem;
+            m_iObtainStuckTicks = 0;
         }
 
         ITEM_t* pDrop = &Items[m_iCurrentItem];
@@ -1371,12 +1526,75 @@ namespace MUHelper
 
         if (SendGetItem == -1)
         {
-            SendGetItem = m_iCurrentItem;
-            SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
-            DeleteItem(m_iCurrentItem);
+            if (!CheckTile(Hero, &Hero->Object, 1.5f))
+            {
+                // Common case: a monster is parked on top of the drop. Defer
+                // pickup *without* blacklisting so Attack() runs this tick to
+                // clear the blocker. Next round the drop becomes reachable
+                // and we re-target it.
+                if (IsMonsterOnTile(TargetX, TargetY))
+                {
+                    m_iCurrentItem = MAX_ITEMS;
+                    m_iLastObtainItem = MAX_ITEMS;
+                    m_iObtainStuckTicks = 0;
+                    return 1;
+                }
+
+                const bool bHasPath = PathFinding2((Hero->PositionX), (Hero->PositionY), TargetX, TargetY, &Hero->Path);
+                if (bHasPath)
+                {
+                    SendMove(Hero, &Hero->Object);
+                }
+
+                ++m_iObtainStuckTicks;
+                // Hard skip: no path at all, or we've been trying too long.
+                // Add to the session skip-set so SelectItemToObtain stops
+                // returning it. DeleteItem clears the entry once the drop
+                // disappears from the world.
+                if (!bHasPath || m_iObtainStuckTicks >= MAX_OBTAIN_STUCK_TICKS)
+                {
+                    m_setSkippedItems.insert(m_iCurrentItem);
+                    m_iCurrentItem = MAX_ITEMS;
+                    m_iLastObtainItem = MAX_ITEMS;
+                    m_iObtainStuckTicks = 0;
+                    return 1;
+                }
+
+                return 0;
+            }
+            else
+            {
+                if (SendGetItem == -1)
+                {
+                    SendGetItem = m_iCurrentItem;
+                    SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
+                    DeleteItem(m_iCurrentItem);
+                }
+            }
         }
 
         return 1;
+    }
+
+    bool CMuHelper::IsMonsterOnTile(int iTileX, int iTileY)
+    {
+        for (int i = 0; i < MAX_CHARACTERS_CLIENT; i++)
+        {
+            CHARACTER* p = &CharactersClient[i];
+            if (!p->Object.Live || p->Dead > 0)
+            {
+                continue;
+            }
+            if (!IsMonster(p))
+            {
+                continue;
+            }
+            if (p->PositionX == iTileX && p->PositionY == iTileY)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     bool CMuHelper::ShouldObtainItem(int iItemId)
@@ -1422,9 +1640,13 @@ namespace MUHelper
         m_setItems.erase(iItemId);
         _itemsLock.unlock();
 
+        m_setSkippedItems.erase(iItemId);
+
         if (iItemId == m_iCurrentItem)
         {
             m_iCurrentItem = MAX_ITEMS;
+            m_iLastObtainItem = MAX_ITEMS;
+            m_iObtainStuckTicks = 0;
         }
     }
 
@@ -1442,6 +1664,11 @@ namespace MUHelper
 
         for (const int& iItemId : setItems)
         {
+            if (m_setSkippedItems.count(iItemId) > 0)
+            {
+                continue;
+            }
+
             if (!ShouldObtainItem(iItemId))
             {
                 continue;
