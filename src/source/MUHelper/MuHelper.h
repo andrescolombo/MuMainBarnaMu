@@ -83,6 +83,7 @@ namespace MUHelper
 		bool IsSelfPositionSkill(ActionSkillType iSkill);
 		int SimulateBasicAttack();
 		bool IsMonsterOnTile(int iTileX, int iTileY);
+		int GetBasicAttackIntervalMs() const;
 
 	private:
 		ConfigData m_config;
@@ -113,6 +114,7 @@ namespace MUHelper
 		bool m_bTimerActivatedBuffOngoing;
 		bool m_bPetActivated;
 		int m_iTotalCost;
+		DWORD m_dwLastBasicHitTick = 0;
 	};
 
 	extern CMuHelper g_MuHelper;
