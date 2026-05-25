@@ -1351,7 +1351,10 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLin
     InitVSync();
     if (IsVSyncAvailable())
     {
-        EnableVSync();
+        if (GameConfig::GetInstance().GetVSync())
+            EnableVSync();
+        else
+            DisableVSync();
         SetTargetFps(-1); // unlimited
     }
 

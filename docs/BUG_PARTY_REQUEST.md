@@ -2,18 +2,130 @@
 
 ## Current Status
 
-Unresolved.
+**Resolved — pending final verification.**
 
-The request mode choices save locally, but Mu Helper still fails to start from the Play button after
-the party request option was added. The latest reported repro is:
+Fixed in commit `c5c7203d` ("feat(muhelper): implement local party/social request modes & align
+config logic with Sven"). The root cause was that the request-mode fields lived inside
+`MUHelper::ConfigData`, the same struct used to build the server `MuHelperSaveData` packet. Moving
+them out of `ConfigData` into client-only state restored the original Play/Save behavior.
+
+Andres rebuilt the client in Visual Studio 2022 after the commit and the Play button starts Mu Helper
+again. One hardening fix remains (uninitialized member defaults — see "Remaining Fix Plan").
+
+The original repro (now passing):
 
 1. Open Mu Helper.
 2. Set Party request handling to `On`.
 3. Save the Mu Helper settings.
 4. Press Play.
-5. Mu Helper does not start.
+5. Mu Helper starts.
 
 The client is built and tested by Andres with Visual Studio 2022.
+
+See "Root Cause and Resolution" below for the full analysis; the historical investigation notes are
+kept further down for context.
+
+## Root Cause and Resolution
+
+### What we found
+
+The investigation (reading the committed baseline vs. the working tree) narrowed the regression to a
+single architectural mistake, not the request handlers and not the UI:
+
+- `MuHelperData.cpp` (the `ConfigDataSerDe::Serialize` / `Deserialize` that build the server
+  `MuHelperSaveData` packet) was **byte-identical** to the last working commit — `git diff` showed
+  only a blank line removed. The request modes were never written into the packet.
+- In the working baseline, the old `bAutoAcceptFriend` / `bAutoAcceptGuild` booleans also lived in
+  `ConfigData` but were **never serialized** — they were already effectively client-local.
+- The feature replaced those booleans with `byFriendRequestMode` / `byGuildRequestMode` /
+  `byPartyRequestMode` **inside `ConfigData`**, and added save-path logic
+  (`HasServerConfigChanged()`, `_LastServerConfig`, `_HasLastServerConfig`) in
+  `CNewUIMuHelper::SaveConfig()`.
+
+The problem: `ConfigData` is the server save/load model. Mixing client-only request state into it
+coupled the local request settings to the Mu Helper packet/start path. Keeping that state in the
+shared struct is what made the Save/Play flow fragile and is the documented "high risk" called out in
+the original Working Theory below.
+
+### The fix that worked (commit `c5c7203d`)
+
+Request modes were **decoupled from `ConfigData`** and moved into client-only state:
+
+- Removed `byFriendRequestMode` / `byGuildRequestMode` / `byPartyRequestMode` from
+  `MUHelper::ConfigData` (`src/source/MUHelper/MuHelperData.h`). `ConfigData` now ends at
+  `bUseSelfDefense`, so `Serialize`/`Deserialize` and the `MuHelperSaveData` packet are identical to
+  the known-good baseline.
+- Added member variables on the UI class instead
+  (`src/source/UI/NewUI/NewUIMuHelper.h`): `m_byFriendRequestMode`, `m_byGuildRequestMode`,
+  `m_byPartyRequestMode`.
+- `LoadRequestModesFromConfig()` / `SaveRequestModesToConfig()` now read/write those members against
+  `GameConfig` (local INI), with no `ConfigData` involvement.
+- `ApplyRequestModeBoxStates()` and `ApplyFriend/Guild/PartyRequestMode()` read/write the member
+  variables.
+- The incoming-request handlers in `WSclient.cpp` (`HandlePartyRequestByMuHelperMode`,
+  `HandleFriendRequestByMuHelperMode`, `HandleGuildRequestByMuHelperMode`) read `GameConfig`
+  directly — unchanged and correct.
+
+Note: the `SaveConfig()` skip-logic (`HasServerConfigChanged` / `_LastServerConfig` /
+`g_MuHelper.Load` branch, and the `<cstring>` include) was **kept** and is now correct and harmless.
+With the modes out of `ConfigData`, that comparison only ever sends the server packet when a real
+server-relevant field changed, and never fires for a request-mode-only change. It is not dead code.
+
+### What was tested
+
+- Static review of the full Save/Play path: `Toggle()` → `TriggerStart()` →
+  `SendMuHelperStatusChangeRequest(0)` → server → `ReceiveMuHelperStatusUpdate()` → `Start()`. This
+  path does not depend on the config save, confirming the regression was in the save-side coupling.
+- Confirmed `MuHelperData.cpp` serialization is unchanged vs. the working baseline (server packet not
+  corrupted by current code).
+- Confirmed the new `Send*Response` functions used by the receive handlers exist with matching
+  signatures (build is not broken by missing symbols).
+- Andres rebuilt in Visual Studio 2022 after `c5c7203d`; the original repro (Party `On` → Save →
+  Play) now starts Mu Helper.
+
+### Versions / commits
+
+- **`c5c7203d`** — "feat(muhelper): implement local party/social request modes & align config logic
+  with Sven". The fix commit. Decouples request modes from `ConfigData`, keeps them in `GameConfig` +
+  UI member state. Built and tested locally; **not pushed**.
+
+### Remaining Fix Plan (hardening — uninitialized members)
+
+One latent issue remains. The new member variables in `src/source/UI/NewUI/NewUIMuHelper.h`
+(`m_byFriendRequestMode`, `m_byGuildRequestMode`, `m_byPartyRequestMode`) are declared **without
+initializers**, and the `CNewUIMuHelper` constructor does not set them. They only get a defined value
+once `LoadSavedConfig()` (server config arrives) or `Reset()` runs.
+
+`ApplyRequestModeBoxStates()` reads all three, and each `ApplyFriend/Guild/PartyRequestMode()` reads
+the other two while setting only one. If a radio is clicked before the server config arrives, the
+other boxes render from indeterminate bytes (cosmetic, not a crash) — but it is undefined behavior and
+should be fixed.
+
+**Plan:**
+
+1. Add inline initializers in `src/source/UI/NewUI/NewUIMuHelper.h` (the `m_by*RequestMode`
+   declarations):
+   ```cpp
+   BYTE m_byFriendRequestMode = MUHelper::REQUEST_HANDLING_SHOW;
+   BYTE m_byGuildRequestMode  = MUHelper::REQUEST_HANDLING_SHOW;
+   BYTE m_byPartyRequestMode  = MUHelper::REQUEST_HANDLING_SHOW;
+   ```
+   The header already includes `MUHelper/MuHelper.h` → `MuHelperData.h`, so the enum is in scope.
+2. Purely additive; cannot change behavior for paths that already set the members. It only removes the
+   indeterminate-byte window before the first `LoadSavedConfig()` / `Reset()`.
+3. Do **not** remove the `SaveConfig` skip-logic / `HasServerConfigChanged` / `_LastServerConfig` /
+   `<cstring>` — they are in active use and correct.
+
+### Verification checklist (manual, VS2022)
+
+1. Rebuild in Visual Studio 2022.
+2. Original repro: Mu Helper → Other Settings → Party `On` → Save → Play. Confirm it starts.
+3. Re-test each mode after the decoupling:
+   - Party `Off` → incoming party invite auto-rejected, no popup.
+   - Party `Auto` → auto-accepted, no popup.
+   - Party `On` → normal popup.
+   - Same matrix for Friend and Guild.
+4. Confirm modes persist across a client restart (they live in `GameConfig` INI).
 
 ## Intended Behavior
 
@@ -84,6 +196,13 @@ The current bug is that the UI/save side still appears to interfere with the Mu 
 - Friend, guild, and party request handlers were added client-side.
 - After the party request option was added, saving the Mu Helper settings and pressing Play still
   does not start Mu Helper.
+
+## Historical Investigation Notes (pre-fix)
+
+> The sections below describe the state **before** commit `c5c7203d` and the dead-end attempts that
+> led to the fix. They are kept for context. Where they say request modes live in `ConfigData` or
+> that "Play still does not start", that is the pre-fix situation — superseded by "Root Cause and
+> Resolution" above.
 
 ## Files Modified or Touched
 

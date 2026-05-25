@@ -12,7 +12,7 @@ This file contains instructions specifically for Claude-based agents (like Claud
 
 ## Git Commands
 > [!CRITICAL]
-> **DO NOT PUSH**: AI must **NEVER** run `git push`. Remote pushes are strictly out of scope.
+> **DO NOT PUSH**: AI must **NEVER** run `git push` without specific "push" command from user. Remote pushes are strictly out of scope without authorization.
 
 ## Code Style & Conventions
 - **Exit Early**: Place guard conditions at the top of functions (`if (bad) return;`). Avoid deep nesting.
@@ -20,3 +20,13 @@ This file contains instructions specifically for Claude-based agents (like Claud
 - **No Magic Numbers**: Give numbers, colors, times, and array offsets named constants (`constexpr` / `const` / `enum`).
 - **No Heap Allocations in Hot Paths**: Inside rendering loops or per-frame character updates, do NOT allocate memory on the heap (avoid `new`, `std::vector`, or `std::string` instantiation).
 - **Core Architecture References**: Refer to [AGENTS.md](file:///c:/Users/Andres/MuMain/MuMain/AGENTS.md), [LLM.md](file:///c:/Users/Andres/MuMain/MuMain/LLM.md), and [docs/CODING_RULES.md](file:///c:/Users/Andres/MuMain/MuMain/docs/CODING_RULES.md) for full architecture and styling rules.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
