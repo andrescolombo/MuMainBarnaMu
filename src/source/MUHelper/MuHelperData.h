@@ -70,6 +70,12 @@ namespace MUHelper
 
 	typedef struct _PetAttackConfig
 	{
+		int iHuntingRange = 0;
+
+		bool bLongRangeCounterAttack = false;
+		bool bReturnToOriginalPosition = false;
+		int iMaxSecondsAway = 0;
+
 		std::array<uint32_t, 3> aiSkill = { 0, 0, 0 };
 		std::array<uint32_t, 3> aiSkillCondition = { 0, 0, 0 };
 		std::array<uint32_t, 3> aiSkillInterval = { 0, 0, 0 };
@@ -97,6 +103,7 @@ namespace MUHelper
 
 		bool bRepairItem = false;
 
+		int iObtainingRange = 0;
 		bool bPickAllItems = false;
 		bool bPickSelectItems = false;
 		bool bPickJewel = false;

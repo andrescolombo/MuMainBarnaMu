@@ -164,7 +164,8 @@ namespace MUHelper
         m_iLastObtainItem = MAX_ITEMS;
         m_iObtainStuckTicks = 0;
         m_setSkippedItems.clear();
-        m_posOriginal = { Hero->PositionX, Hero->PositionY };
+        m_posOriginal.x = Hero->PositionX;
+        m_posOriginal.y = Hero->PositionY;
 
         m_iHuntingDistance = ComputeDistanceByRange(m_config.iHuntingRange);
         m_iObtainingDistance = ComputeDistanceByRange(m_config.iObtainingRange);
@@ -340,6 +341,11 @@ namespace MUHelper
         int iDy = posA.y - posB.y;
 
         return static_cast<int>(std::ceil(std::sqrt(iDx * iDx + iDy * iDy)));
+    }
+
+    int CMuHelper::ComputeDistanceByRange(int iRange)
+    {
+        return ComputeDistanceBetween({ 0, 0 }, { iRange, iRange });
     }
 
     float CMuHelper::GetAttackRange(ActionSkillType iSkill)

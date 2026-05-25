@@ -58,6 +58,7 @@ namespace MUHelper
 		int ConsumePotion();
 		int Attack();
 		int RepairEquipments();
+		int Regroup();
 		ActionSkillType SelectAttackSkill();
 		int SimulateAttack(ActionSkillType iSkill);
 		int SimulateSkill(ActionSkillType iSkill, bool bTargetRequired, int iTarget);
@@ -69,8 +70,10 @@ namespace MUHelper
 		int CountTargetsInSkillRange(ActionSkillType iSkill, bool bOnlyAttacking);
 		float GetAttackRange(ActionSkillType iSkill);
 		void CleanupTargets();
+		int ComputeDistanceByRange(int iRange);
 		int ComputeDistanceFromTarget(CHARACTER* pTarget);
 		int ComputeDistanceBetween(POINT posA, POINT posB);
+		int SimulateMove(POINT posMove);
 		int ObtainItem();
 		int SelectItemToObtain();
 		bool ShouldObtainItem(int iItemId);
@@ -83,6 +86,7 @@ namespace MUHelper
 
 	private:
 		ConfigData m_config;
+		POINT m_posOriginal;
 		std::thread m_timerThread;
 		std::atomic<bool> m_bActive;
 		std::set<int> m_setTargets;
@@ -98,8 +102,11 @@ namespace MUHelper
 		int m_iCurrentHealPartyIndex;
 		int m_iComboState;
 		ActionSkillType m_iCurrentSkill;
+		int m_iHuntingDistance;
+		int m_iObtainingDistance;
 		int m_iLoopCounter;
 		int m_iSecondsElapsed;
+		int m_iSecondsAway;
 		int m_iElapsedMilliseconds;
 		int m_iLastBuffTimerSecond;
 		std::map<std::pair<int, int>, int> m_mapLastBuffCastSecond;

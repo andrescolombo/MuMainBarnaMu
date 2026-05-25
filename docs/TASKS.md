@@ -27,6 +27,12 @@ This file tracks the outstanding feature requests, gameplay tweaks, and UI impro
   - `Z` — open/close the Mu Helper configuration panel.
   - `F8` — start/stop (play/pause) the Mu Helper.
 
+### 🎨 Missing Assets (from friend's merge)
+- [ ] **Jewel Bank background image**
+  - File: `Data/Interface/barna_jewelbank_back.jpg`
+  - Currently stubbed to fall back to `newui_msgbox_back.jpg` in `src/source/UI/NewUI/NewUIMuHelper.cpp` (`CNewUIJewelBank::LoadImages`).
+  - Action: get the original asset from buscagliamartin's BarnaMu server install, drop it into `src/bin/Data/Interface/` and into the runtime `Data/Interface/` next to `Main.exe`, then revert the LoadBitmap call to use the real filename.
+
 ---
 
 ## 2. Completed / Resolved Tasks

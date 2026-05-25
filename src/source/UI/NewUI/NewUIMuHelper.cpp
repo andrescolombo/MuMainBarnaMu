@@ -57,6 +57,8 @@ enum ECheckBoxId: uint16_t
     CHECKBOX_ID_PARTY_REQUEST_NORMAL,
     CHECKBOX_ID_PARTY_REQUEST_OFF,
     CHECKBOX_ID_OFFLEVEL,
+    CHECKBOX_ID_AUTO_ACCEPT_FRIEND,
+    CHECKBOX_ID_AUTO_ACCEPT_GUILD,
     CHECKBOX_ID_FALLBACK_BASIC_ATTACK
 };
 
@@ -3510,7 +3512,9 @@ void CNewUIJewelBank::SetPos(int x, int y)
 
 void CNewUIJewelBank::LoadImages()
 {
-    LoadBitmap(L"Interface\\barna_jewelbank_back.jpg", IMAGE_JEWEL_BANK_BACK, GL_LINEAR);
+    // FIXME: barna_jewelbank_back.jpg ships from friend's server install; fall back
+    // to a known existing background until we have the real asset.
+    LoadBitmap(L"Interface\\newui_msgbox_back.jpg", IMAGE_JEWEL_BANK_BACK, GL_LINEAR);
     LoadBitmap(L"Interface\\newui_item_box.tga", IMAGE_ITEM_BOX, GL_LINEAR);
     LoadBitmap(L"Interface\\newui_item_table01(L).tga", IMAGE_TABLE_TOP_LEFT, GL_LINEAR);
     LoadBitmap(L"Interface\\newui_item_table01(R).tga", IMAGE_TABLE_TOP_RIGHT, GL_LINEAR);
