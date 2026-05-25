@@ -5,7 +5,6 @@
 
 #include "UI/NewUI/NewUIBase.h"
 #include "UI/NewUI/NewUIManager.h"
-#include "UI/NewUI/NewUI3DRenderMng.h"
 #include "UI/NewUI/Widgets/NewUIButton.h"
 #include "MUHelper/MuHelper.h"
 
@@ -57,6 +56,7 @@ namespace SEASON3B
             //--
             IMAGE_WINDOW_TAB_BTN = BITMAP_GUILDINFO_BEGIN,
             //--
+            IMAGE_MACROUI_HELPER_RAGEMINUS = BITMAP_INTERFACE_MACROUI_BEGIN,		// newui_position02.tga			(70, 25)
             IMAGE_MACROUI_HELPER_OPTIONBUTTON = BITMAP_INTERFACE_MACROUI_BEGIN + 1,		// newui_position02.tga			(70, 25)
             IMAGE_MACROUI_HELPER_INPUTNUMBER = BITMAP_INTERFACE_MACROUI_BEGIN + 2,
             IMAGE_MACROUI_HELPER_INPUTSTRING = BITMAP_INTERFACE_MACROUI_BEGIN + 3,
@@ -181,11 +181,14 @@ namespace SEASON3B
         void ApplyGuildRequestMode(int iCheckboxId);
         void ApplyPartyRequestMode(int iCheckboxId);
         void ApplyConfigFromSkillSlot(int iSlot, int iSkill);
+        void ApplyHuntRangeUpdate(int iDelta);
+        void ApplyLootRangeUpdate(int iDelta);
         void SaveExtraItem();
         void RemoveExtraItem();
 
     private:
         CNewUIManager* m_pNewUIMng;
+        CUITextInputBox m_DistanceTimeInput;
         CUITextInputBox m_Skill2DelayInput;
         CUITextInputBox m_Skill3DelayInput;
         CUITextInputBox m_ItemInput;
@@ -263,8 +266,7 @@ namespace SEASON3B
 
         typedef struct
         {
-            int skillId;    // ActionSkillType value
-            int slotIndex;  // index into CharacterAttribute->Skill[] for tooltip lookup
+            int skillId;
             POINT location;
             SIZE area;
             bool isVisible;
@@ -296,8 +298,7 @@ namespace SEASON3B
         int m_iRenderSkillInfoType;
         int m_iRenderSkillInfoPosX;
         int m_iRenderSkillInfoPosY;
-        std::vector<int> m_aiSkillsToRender;   // skill type values
-        std::vector<int> m_aiSkillSlots;        // parallel: CharacterAttribute->Skill[] slot index
+        std::vector<int> m_aiSkillsToRender;
 
         EVENT_STATE m_EventState;
     };
@@ -348,6 +349,7 @@ namespace SEASON3B
             //--
             IMAGE_WINDOW_TAB_BTN = BITMAP_GUILDINFO_BEGIN,
             //--
+            IMAGE_MACROUI_HELPER_RAGEMINUS = BITMAP_INTERFACE_MACROUI_BEGIN,		// newui_position02.tga			(70, 25)
             IMAGE_MACROUI_HELPER_OPTIONBUTTON = BITMAP_INTERFACE_MACROUI_BEGIN + 1,		// newui_position02.tga			(70, 25)
             IMAGE_MACROUI_HELPER_INPUTNUMBER = BITMAP_INTERFACE_MACROUI_BEGIN + 2,
             IMAGE_MACROUI_HELPER_INPUTSTRING = BITMAP_INTERFACE_MACROUI_BEGIN + 3,
@@ -478,5 +480,6 @@ namespace SEASON3B
         CNewUIButton m_BtnWdrPack[ITEM_COUNT];
         CNewUIButton m_BtnClose;
     };
+
 
 }

@@ -4426,11 +4426,6 @@ void CloseNPCGMWindow()
 
 void SendMove(CHARACTER* c, OBJECT* o)
 {
-    if (MUHelper::g_MuHelper.IsActive() && c == Hero)
-    {
-        return;
-    }
-
     if (g_pNewUISystem->IsImpossibleSendMoveInterface() == true)
     {
         return;
