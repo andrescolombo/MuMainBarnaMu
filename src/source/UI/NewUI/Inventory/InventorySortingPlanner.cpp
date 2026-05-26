@@ -75,6 +75,7 @@ namespace
     // Forward declarations: the per-stage logging helpers live next to
     // PlannerLog further down, but BuildPass1Layout (above them in the file)
     // needs to call them.
+    void PlannerLog(const wchar_t* fmt, int a = 0, int b = 0, int c = 0, int d = 0, int e = 0, int f = 0);
     void LogSortedRank(int rank, const WorkItem& item);
     void LogPass1Placement(int rank, const WorkItem& item);
 
