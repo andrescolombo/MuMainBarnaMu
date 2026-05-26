@@ -69,6 +69,12 @@ namespace
         Phase phase;
     };
 
+    // Forward declarations: the per-stage logging helpers live next to
+    // PlannerLog further down, but BuildPass1Layout (above them in the file)
+    // needs to call them.
+    void LogSortedRank(int rank, const WorkItem& item);
+    void LogPass1Placement(int rank, const WorkItem& item);
+
     struct Layout
     {
         std::vector<WorkItem> items;
