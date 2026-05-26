@@ -132,14 +132,31 @@ namespace
         return true;
     }
 
-    bool CompareForPlacement(const WorkItem& left, const WorkItem& right)
+    // Higher value = placed earlier. The canonical priority is height-first so a
+    // 1x4 spear and a 2x4 wing are placed before any height-3 item, and the
+    // height-3 group (2x3 + 1x3) is placed before any height-2 item.
+    int GetArrangeHeightPriority(const WorkItem& item)
     {
-        if (left.phase != right.phase) return left.phase < right.phase;
-        const int leftArea = left.width * left.height;
-        const int rightArea = right.width * right.height;
-        if (leftArea != rightArea) return leftArea > rightArea;
-        if (left.height != right.height) return left.height > right.height;
+        return item.height;
+    }
+
+    int GetArrangeAreaPriority(const WorkItem& item)
+    {
+        return item.width * item.height;
+    }
+
+    bool CompareItemsForCanonicalArrange(const WorkItem& left, const WorkItem& right)
+    {
+        const int lh = GetArrangeHeightPriority(left);
+        const int rh = GetArrangeHeightPriority(right);
+        if (lh != rh) return lh > rh;
+
+        const int la = GetArrangeAreaPriority(left);
+        const int ra = GetArrangeAreaPriority(right);
+        if (la != ra) return la > ra;
+
         if (left.width != right.width) return left.width > right.width;
+        if (left.groupKey != right.groupKey) return left.groupKey < right.groupKey;
         if (left.sourceIndex != right.sourceIndex) return left.sourceIndex < right.sourceIndex;
         return left.key < right.key;
     }
@@ -208,7 +225,7 @@ namespace
     // Pass 1: place wide and tall items only; 1x1 fillers handled by pass 2+.
     bool BuildPass1Layout(Layout& layout, int columnCount, int rowCount)
     {
-        std::sort(layout.items.begin(), layout.items.end(), CompareForPlacement);
+        std::sort(layout.items.begin(), layout.items.end(), CompareItemsForCanonicalArrange);
         std::vector<bool> grid(columnCount * rowCount, false);
         for (WorkItem& item : layout.items)
         {
@@ -906,16 +923,19 @@ PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int r
         PlannerLog(L"[ArrangeSort] pass3 unavailable");
     }
 
-    // Acceptance: take the plan if it wins the total-score margin OR if 1x1
-    // grouping/cleanup improves enough on its own (without structural regression).
-    // The grouping path scores the layout with moves=0 so a long but pure-cleanup
-    // sequence is not penalised away by the move-count term.
+    // Acceptance: compare structural-vs-structural so a height-first reorder
+    // that requires many moves is not unfairly penalised. currentScore is
+    // already structural-only (computed with moves=0), so the symmetric
+    // comparison uses bestStructuralScore. A separate 1x1-grouping path
+    // catches pure-cleanup plans that don't shift the structural total.
     const int bestStructuralScore = ScoreLayout(best, columnCount, rowCount, /*moves*/ 0);
-    const bool acceptByTotal = bestScore < currentScore - settings.acceptanceThreshold;
+    const bool acceptByStructural = bestStructuralScore < currentScore - settings.acceptanceThreshold;
     const bool acceptByGrouping = bestGroup < currentGroupScore - settings.oneByOneCleanupThreshold
         && bestStructuralScore <= currentScore;
-    PlannerLog(L"[ArrangeSort] accept: byTotal=%d byGroup=%d struct=%d", acceptByTotal ? 1 : 0, acceptByGrouping ? 1 : 0, bestStructuralScore);
-    if (!acceptByTotal && !acceptByGrouping)
+    const bool acceptByTotal = bestScore < currentScore - settings.acceptanceThreshold;
+    PlannerLog(L"[ArrangeSort] accept: byTotal=%d byStruct=%d byGroup=%d struct=%d",
+        acceptByTotal ? 1 : 0, acceptByStructural ? 1 : 0, acceptByGrouping ? 1 : 0, bestStructuralScore);
+    if (!acceptByTotal && !acceptByStructural && !acceptByGrouping)
     {
         PlannerLog(L"[ArrangeSort] no plan adopted");
         return result;
