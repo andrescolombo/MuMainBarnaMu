@@ -118,6 +118,76 @@ Rework the inventory rearrange/sort feature so it:
   catches any case where a cascading move sequence diverges from the plan
   and the build is rejected.
 
+## Diagnostic Pass (current iteration)
+
+### Problem summary
+Four 2x3 bow items in an 8x8 inventory. Expected: tight 4-wide x 3-tall block
+at rows 0-2, occupying (0,0), (2,0), (4,0), (6,0). Observed: three 2x3s top-
+left, one 2x3 stranded in the lower/right area, with 1x1 / 1x3 items occupying
+the top-right region that should belong to the fourth bow.
+
+### Hypotheses (ordered most-likely-first)
+1. Snapshot / metadata: the stray bow does not enter the planner as 2x3.
+2. Sort: the fourth 2x3 sorts after 1x3 / 1x1 items.
+3. Pass 1: even with correct sort, first-fit does not place the fourth 2x3 at (6,0).
+4. Pass 2 / Pass 3 structural regression: a later pass moves a multi-cell item.
+5. Scoring: a fragmented multi-cell layout is being accepted because
+   ScoreLayout does not penalise shape fragmentation.
+6. Move emission: in-memory target is correct but the realised UI state diverges.
+
+### Diagnostic logs added (this iteration)
+All logs go through `g_ConsoleDebug->Write(MCD_NORMAL, ...)` and are tagged
+with one of:
+
+- `[ArrangeItem] key=... type=... level=... w=... h=... area=... source=(...,...) srcIdx=... gk=...`
+  One per item, emitted at the top of `Plan()`. Confirms hypothesis 1.
+- `[ArrangeSortOrder] rank=N key=... type=... level=... w=... h=... area=... gk=... srcIdx=...`
+  One per item after the canonical sort, first convergence iter only. Confirms hypothesis 2.
+- `[ArrangePass1] rank=N key=... w=... h=... mode=0/1/2 placed=(...,...)`
+  One per non-filler placement, first convergence iter only. Confirms hypothesis 3.
+  `mode=0` = wide row-major, `mode=1` = tall column-major, `mode=2` = filler.
+- `[ArrangeError] pass=PassN key=... w=... h=... oldTarget=(...) newTarget=(...)`
+  Emitted by `CheckStructuralInvariant` if any item with width>1 OR height>1
+  has a different target in pass 2 or pass 3 compared to pass 1. Confirms
+  hypothesis 4.
+- `[ArrangeScore] iter=N compact=... holes=... adjMis=... moves=... largestRect=...`
+  `[ArrangeScore] iter=N group1x1=... shapeFrag=... (weight=...)`
+  Per convergence iteration. The `shapeFrag` metric is logged but
+  `kShapeFragmentationWeight = 0` so it is NOT yet applied to ScoreLayout.
+
+### Structural invariant
+Pass 2 and Pass 3 must not change `targetX/Y` for any item where
+`width > 1 || height > 1`. `CheckStructuralInvariant(pass1, passN)` walks
+both layouts and logs `[ArrangeError]` for every violation. The current
+`BuildPass2Layout` / `BuildPass3Layout` only modify filler items, so the
+invariant should hold; the check is a safety net.
+
+### Expected canonical 8x8 layout for four 2x3 items only
+```
+(0,0)(0,0) (2,0)(2,0) (4,0)(4,0) (6,0)(6,0)
+(0,0)(0,0) (2,0)(2,0) (4,0)(4,0) (6,0)(6,0)
+(0,0)(0,0) (2,0)(2,0) (4,0)(4,0) (6,0)(6,0)
+. . . . . . . .
+. . . . . . . .
+. . . . . . . .
+. . . . . . . .
+. . . . . . . .
+```
+
+### Conditional next step (NOT applied yet)
+If `[ArrangeItem]` / `[ArrangeSortOrder]` / `[ArrangePass1]` /
+`[ArrangeError]` all look correct but the final layout is still fragmented,
+flip `kShapeFragmentationWeight` from 0 to 40 (or 80) to penalise stranded
+multi-cell items. The metric is already being computed and logged.
+
+### Verification checklist
+- [ ] All four bow items log as `w=2 h=3`.
+- [ ] Sort places all four bows at ranks 0..3 (before any 1x3 / 1x1).
+- [ ] Pass 1 places them at (0,0), (2,0), (4,0), (6,0).
+- [ ] No `[ArrangeError]` lines emitted.
+- [ ] If 1..3 pass and the layout is still wrong, ship a follow-up that
+      sets `kShapeFragmentationWeight = 40`.
+
 ## Final Status
 - 3-pass planner extracted into `UI::Inventory::Sorting` and wired into
   `CNewUIMyInventory::BuildInventoryRearrangeMoves`. Pending in-client test.

@@ -35,6 +35,12 @@ namespace
 
     // Flip to false to silence planner diagnostics without removing call sites.
     constexpr bool kPlannerDebugLogging = true;
+    // Per-item logs (snapshot, sort order, per-placement). Noisy; gated also
+    // to the first convergence iteration only at the call site.
+    constexpr bool kPlannerDebugVerbose = true;
+    // Diagnostic-only: logged in [ArrangeScore] but NOT applied to ScoreLayout
+    // until logs prove the earlier pipeline stages are correct.
+    constexpr int kShapeFragmentationWeight = 0;
 
     // Maximum in-memory planning iterations. Each iteration feeds the previous
     // iteration's target layout back as the next iteration's source so the
@@ -229,20 +235,28 @@ namespace
     }
 
     // Pass 1: place wide and tall items only; 1x1 fillers handled by pass 2+.
-    bool BuildPass1Layout(Layout& layout, int columnCount, int rowCount)
+    bool BuildPass1Layout(Layout& layout, int columnCount, int rowCount, bool verbose = false)
     {
         std::sort(layout.items.begin(), layout.items.end(), CompareItemsForCanonicalArrange);
+        if (verbose)
+        {
+            for (size_t i = 0; i < layout.items.size(); ++i) LogSortedRank(static_cast<int>(i), layout.items[i]);
+        }
         std::vector<bool> grid(columnCount * rowCount, false);
+        int rank = 0;
         for (WorkItem& item : layout.items)
         {
             if (item.phase == PHASE_FILLER)
             {
+                ++rank;
                 continue;
             }
             if (!PlaceForPhase(grid, columnCount, rowCount, item))
             {
                 return false;
             }
+            if (verbose) LogPass1Placement(rank, item);
+            ++rank;
         }
         // Tentatively assign 1x1s top-left so the layout is complete even if
         // pass 2 is not adopted; this keeps the scorer comparable across passes.
@@ -570,6 +584,50 @@ namespace
         g_ConsoleDebug->Write(MCD_NORMAL, fmt, a, b, c, d, e, f);
     }
 
+    void LogPlannerItem(const PlannerItem& item)
+    {
+        if (!kPlannerDebugLogging || !kPlannerDebugVerbose || g_ConsoleDebug == nullptr) return;
+        const int type = (item.groupKey >> 16) & 0xFFFF;
+        const int level = item.groupKey & 0xFFFF;
+        const int area = item.width * item.height;
+        g_ConsoleDebug->Write(MCD_NORMAL,
+            L"[ArrangeItem] key=%08X type=%d level=%d w=%d h=%d area=%d source=(%d,%d) srcIdx=%d gk=%d",
+            static_cast<int>(item.key), type, level, item.width, item.height, area,
+            item.sourceX, item.sourceY, item.sourceIndex, item.groupKey);
+    }
+
+    void LogSortedRank(int rank, const WorkItem& item)
+    {
+        if (!kPlannerDebugLogging || !kPlannerDebugVerbose || g_ConsoleDebug == nullptr) return;
+        const int type = (item.groupKey >> 16) & 0xFFFF;
+        const int level = item.groupKey & 0xFFFF;
+        const int area = item.width * item.height;
+        g_ConsoleDebug->Write(MCD_NORMAL,
+            L"[ArrangeSortOrder] rank=%d key=%08X type=%d level=%d w=%d h=%d area=%d gk=%d srcIdx=%d",
+            rank, static_cast<int>(item.key), type, level, item.width, item.height, area,
+            item.groupKey, item.sourceIndex);
+    }
+
+    void LogPass1Placement(int rank, const WorkItem& item)
+    {
+        if (!kPlannerDebugLogging || !kPlannerDebugVerbose || g_ConsoleDebug == nullptr) return;
+        // mode: 0=wide(row-major), 1=tall(column-major), 2=filler(row-major)
+        const int mode = static_cast<int>(item.phase);
+        g_ConsoleDebug->Write(MCD_NORMAL,
+            L"[ArrangePass1] rank=%d key=%08X w=%d h=%d mode=%d placed=(%d,%d)",
+            rank, static_cast<int>(item.key), item.width, item.height, mode,
+            item.targetX, item.targetY);
+    }
+
+    void LogStructuralViolation(const wchar_t* pass, const WorkItem& item, int newX, int newY)
+    {
+        if (!kPlannerDebugLogging || g_ConsoleDebug == nullptr) return;
+        g_ConsoleDebug->Write(MCD_NORMAL,
+            L"[ArrangeError] pass=%s key=%08X w=%d h=%d oldTarget=(%d,%d) newTarget=(%d,%d)",
+            pass, static_cast<int>(item.key), item.width, item.height,
+            item.targetX, item.targetY, newX, newY);
+    }
+
     // Diagnostic: number of pairs (a, b) where a precedes b in row-major
     // traversal yet a is strictly shorter than b. A canonical height-first
     // layout has zero violations; the messier the layout, the higher the
@@ -591,6 +649,50 @@ namespace
             }
         }
         return violations;
+    }
+
+    // Sum over shape groups (width, height) of (boundingBoxArea - occupiedArea).
+    // Zero when all instances of a shape sit in a tight contiguous block; grows
+    // when one instance gets stranded away from its siblings.
+    int ComputeShapeFragmentation(const Layout& layout)
+    {
+        // Items in a 8x8 inventory are <= 64, simple O(n^2) grouping is fine.
+        struct ShapeBucket { int w; int h; int n; int minX; int maxX; int minY; int maxY; };
+        std::vector<ShapeBucket> buckets;
+        buckets.reserve(layout.items.size());
+        for (const WorkItem& item : layout.items)
+        {
+            ShapeBucket* found = nullptr;
+            for (ShapeBucket& b : buckets)
+            {
+                if (b.w == item.width && b.h == item.height) { found = &b; break; }
+            }
+            const int right = item.targetX + item.width;
+            const int bottom = item.targetY + item.height;
+            if (found == nullptr)
+            {
+                buckets.push_back({ item.width, item.height, 1,
+                    item.targetX, right, item.targetY, bottom });
+            }
+            else
+            {
+                ++found->n;
+                if (item.targetX < found->minX) found->minX = item.targetX;
+                if (right > found->maxX) found->maxX = right;
+                if (item.targetY < found->minY) found->minY = item.targetY;
+                if (bottom > found->maxY) found->maxY = bottom;
+            }
+        }
+        int fragmentation = 0;
+        for (const ShapeBucket& b : buckets)
+        {
+            if (b.n < 2) continue;
+            const int boundingArea = (b.maxX - b.minX) * (b.maxY - b.minY);
+            const int occupiedArea = b.n * b.w * b.h;
+            const int diff = boundingArea - occupiedArea;
+            if (diff > 0) fragmentation += diff;
+        }
+        return fragmentation;
     }
 
     int ComputeLargestEmptyRectangle(const Layout& layout, int columnCount, int rowCount)
@@ -843,13 +945,36 @@ namespace
         int adoptedPasses;      // 1..MAX_PLAN_PASSES
     };
 
+    // Walks two layouts in lockstep (same item set, same order) and logs an
+    // [ArrangeError] line for every structural item (width>1 OR height>1)
+    // whose target differs between the two. Returns the number of violations.
+    int CheckStructuralInvariant(const Layout& reference, const Layout& candidate, const wchar_t* passName)
+    {
+        int violations = 0;
+        for (const WorkItem& refItem : reference.items)
+        {
+            if (refItem.width <= 1 && refItem.height <= 1) continue;
+            for (const WorkItem& candItem : candidate.items)
+            {
+                if (candItem.key != refItem.key) continue;
+                if (candItem.targetX != refItem.targetX || candItem.targetY != refItem.targetY)
+                {
+                    LogStructuralViolation(passName, refItem, candItem.targetX, candItem.targetY);
+                    ++violations;
+                }
+                break;
+            }
+        }
+        return violations;
+    }
+
     // Runs the existing pass1/2/3 pipeline against a single "current" layout
     // and returns the best target found. Does not touch the original snapshot
     // or emit moves; the caller is responsible for chaining iterations.
-    bool RunPassPipeline(const Layout& currentLayout, int columnCount, int rowCount, const PlannerSettings& settings, PipelineRun& out, int iterIndex)
+    bool RunPassPipeline(const Layout& currentLayout, int columnCount, int rowCount, const PlannerSettings& settings, PipelineRun& out, int iterIndex, bool verbose)
     {
         Layout pass1 = currentLayout;
-        if (!BuildPass1Layout(pass1, columnCount, rowCount))
+        if (!BuildPass1Layout(pass1, columnCount, rowCount, verbose))
         {
             PlannerLog(L"[ArrangeSort] iter=%d pass1 build failed", iterIndex);
             return false;
@@ -871,6 +996,8 @@ namespace
         if (adopted < MAX_PLAN_PASSES && BuildPass2Layout(best, pass2, columnCount, rowCount)
             && ValidateLayout(pass2, columnCount, rowCount))
         {
+            const int viol = CheckStructuralInvariant(pass1, pass2, L"Pass2");
+            (void)viol;
             const int score = ScoreLayout(pass2, columnCount, rowCount, CountMovesNeeded(pass2));
             const int group = ComputeOneByOneGroupingScore(pass2, columnCount, rowCount);
             const bool ok = (score < bestScore - settings.passProgressionThreshold)
@@ -888,6 +1015,8 @@ namespace
         if (adopted < MAX_PLAN_PASSES && BuildPass3Layout(best, pass3, columnCount, rowCount)
             && ValidateLayout(pass3, columnCount, rowCount))
         {
+            const int viol = CheckStructuralInvariant(pass1, pass3, L"Pass3");
+            (void)viol;
             const int score = ScoreLayout(pass3, columnCount, rowCount, CountMovesNeeded(pass3));
             const int group = ComputeOneByOneGroupingScore(pass3, columnCount, rowCount);
             const bool ok = (score < bestScore - settings.passProgressionThreshold)
@@ -959,12 +1088,17 @@ PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int r
         if (!FitsInBounds(it.sourceX, it.sourceY, it.width, it.height, columnCount, rowCount)) return result;
     }
 
+    // Snapshot dump: one [ArrangeItem] line per item so we can confirm every
+    // metadata field the planner is actually working with.
+    for (const PlannerItem& it : items) LogPlannerItem(it);
+
     Layout original = BuildCurrentLayout(items);
     if (!ValidateLayout(original, columnCount, rowCount)) return result;
     const int originalScore = ScoreLayout(original, columnCount, rowCount, /*moves*/ 0);
     const int originalGroup = ComputeOneByOneGroupingScore(original, columnCount, rowCount);
     const int originalViol = CountHeightOrderViolations(original, columnCount);
-    PlannerLog(L"[ArrangeSort] start score=%d group=%d viol=%d", originalScore, originalGroup, originalViol);
+    const int originalFrag = ComputeShapeFragmentation(original);
+    PlannerLog(L"[ArrangeSort] start score=%d group=%d viol=%d frag=%d", originalScore, originalGroup, originalViol, originalFrag);
 
     // Rolling virtual state: starts at the real snapshot, then each accepted
     // iteration replaces its sourceX/Y with the previous candidate's targetX/Y.
@@ -987,7 +1121,10 @@ PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int r
     for (int iter = 0; iter < kMaxArrangeConvergenceIterations; ++iter)
     {
         PipelineRun run;
-        if (!RunPassPipeline(virtualState, columnCount, rowCount, settings, run, iter))
+        // Only the first iteration emits the noisy per-item logs; later
+        // iterations would just repeat the same data.
+        const bool verbose = (iter == 0);
+        if (!RunPassPipeline(virtualState, columnCount, rowCount, settings, run, iter, verbose))
         {
             PlannerLog(L"[ArrangeSort] iter=%d pipeline aborted", iter);
             break;
@@ -996,12 +1133,23 @@ PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int r
         const int candStruct = run.structuralScore;
         const int candGroup = run.groupScore;
         const int candViol = CountHeightOrderViolations(run.best, columnCount);
+        const int candFrag = ComputeShapeFragmentation(run.best);
+        const int candMoves = CountMovesNeeded(run.best);
+        // Score breakdown for the candidate layout (moves=0 component view).
+        int candCompactness = 0;
+        const int candHoles = CountHolesAndCompactness(run.best, columnCount, rowCount, candCompactness);
+        const int candMismatches = ComputeAdjacencyMismatch(run.best, columnCount, rowCount);
+        const int candLargest = ComputeLargestEmptyRectangle(run.best, columnCount, rowCount);
         const bool improvesStruct = candStruct < virtualStruct - settings.passProgressionThreshold;
         const bool improvesGroupNoReg = candGroup < virtualGroup && candStruct <= virtualStruct;
         const bool adopt = improvesStruct || improvesGroupNoReg;
 
         PlannerLog(L"[ArrangeSort] iter=%d virtStruct=%d candStruct=%d candGroup=%d viol=%d adopt=%d",
             iter, virtualStruct, candStruct, candGroup, candViol, adopt ? 1 : 0);
+        PlannerLog(L"[ArrangeScore] iter=%d compact=%d holes=%d adjMis=%d moves=%d largestRect=%d",
+            iter, candCompactness, candHoles, candMismatches, candMoves, candLargest);
+        PlannerLog(L"[ArrangeScore] iter=%d group1x1=%d shapeFrag=%d (weight=%d)",
+            iter, candGroup, candFrag, kShapeFragmentationWeight);
 
         if (!adopt)
         {
