@@ -114,7 +114,9 @@ void CErrorReport::WriteDebugInfoStr(wchar_t* lpszToWrite)
     if (m_hFile != INVALID_HANDLE_VALUE)
     {
         DWORD dwNumber;
-        WriteFile(m_hFile, lpszToWrite, wcslen(lpszToWrite), &dwNumber, NULL);
+        // WriteFile expects a byte count, not a character count. wchar_t is 2 bytes on Windows,
+        // so multiply by sizeof(wchar_t) to write the full UTF-16 LE data correctly.
+        WriteFile(m_hFile, lpszToWrite, wcslen(lpszToWrite) * sizeof(wchar_t), &dwNumber, NULL);
 
         if (dwNumber == 0)
         {
@@ -146,7 +148,8 @@ void CErrorReport::HexWrite(void* pBuffer, int iSize)
         if (i > 0 && i < iSize - 1) {
             if (i % 16 == 15) {	//. new line
                 offset += mu_swprintf(szLine + offset, L"\r\n");
-                WriteFile(m_hFile, szLine, wcslen(szLine), &dwWritten, NULL);
+                // Byte count = char count * sizeof(wchar_t) for correct UTF-16 LE output.
+                WriteFile(m_hFile, szLine, wcslen(szLine) * sizeof(wchar_t), &dwWritten, NULL);
                 offset = 0;
                 offset += mu_swprintf(szLine + offset, L"           : ");
             }
@@ -156,7 +159,8 @@ void CErrorReport::HexWrite(void* pBuffer, int iSize)
         }
     }
     offset += mu_swprintf(szLine + offset, L"\r\n");
-    WriteFile(m_hFile, szLine, wcslen(szLine), &dwWritten, NULL);
+    // Byte count = char count * sizeof(wchar_t) for correct UTF-16 LE output.
+    WriteFile(m_hFile, szLine, wcslen(szLine) * sizeof(wchar_t), &dwWritten, NULL);
 }
 
 void CErrorReport::AddSeparator(void)
