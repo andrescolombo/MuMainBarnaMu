@@ -1,0 +1,830 @@
+#include "stdafx.h"
+#include "UI/NewUI/Inventory/InventorySortingPlanner.h"
+
+#include <algorithm>
+#include <array>
+#include <utility>
+#include <vector>
+
+namespace UI
+{
+namespace Inventory
+{
+namespace Sorting
+{
+
+namespace
+{
+    constexpr int MIN_ITEM_SIZE = 1;
+    constexpr int MAX_ITEM_SIZE = 4;
+    constexpr int MAX_PLAN_PASSES = 3;
+
+    // Scoring weights (lower score => better layout). Tuned so an internal hole
+    // is roughly as bad as several missed adjacencies.
+    constexpr int W_COMPACTNESS = 1;
+    constexpr int W_HOLE = 60;
+    constexpr int W_ADJACENCY = 3;
+    constexpr int W_LARGEST_RECT = 4;
+    constexpr int W_MOVES = 1;
+
+    enum Phase
+    {
+        PHASE_WIDE = 0,
+        PHASE_TALL = 1,
+        PHASE_FILLER = 2,
+    };
+
+    struct WorkItem
+    {
+        DWORD key;
+        int sourceIndex;
+        int sourceX;
+        int sourceY;
+        int targetX;
+        int targetY;
+        int width;
+        int height;
+        int groupKey;
+        Phase phase;
+    };
+
+    struct Layout
+    {
+        std::vector<WorkItem> items;
+    };
+
+    int LinearIndex(int x, int y, int columnCount)
+    {
+        return y * columnCount + x;
+    }
+
+    Phase ClassifyPhase(int width, int height)
+    {
+        if (width > 1)
+        {
+            return PHASE_WIDE;
+        }
+        if (height > 1)
+        {
+            return PHASE_TALL;
+        }
+        return PHASE_FILLER;
+    }
+
+    bool ItemAtTarget(const WorkItem& item)
+    {
+        return item.sourceX == item.targetX && item.sourceY == item.targetY;
+    }
+
+    bool FitsInBounds(int x, int y, int width, int height, int columnCount, int rowCount)
+    {
+        return x >= 0 && y >= 0 && x + width <= columnCount && y + height <= rowCount;
+    }
+
+    void StampOccupancy(std::vector<DWORD>& grid, int columnCount, int x, int y, int width, int height, DWORD value)
+    {
+        for (int dy = 0; dy < height; ++dy)
+        {
+            for (int dx = 0; dx < width; ++dx)
+            {
+                grid[LinearIndex(x + dx, y + dy, columnCount)] = value;
+            }
+        }
+    }
+
+    bool RegionMatches(const std::vector<DWORD>& grid, int columnCount, int x, int y, int width, int height, DWORD owner)
+    {
+        for (int dy = 0; dy < height; ++dy)
+        {
+            for (int dx = 0; dx < width; ++dx)
+            {
+                const DWORD cell = grid[LinearIndex(x + dx, y + dy, columnCount)];
+                if (cell != 0 && cell != owner)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool RegionEmpty(const std::vector<bool>& grid, int columnCount, int x, int y, int width, int height)
+    {
+        for (int dy = 0; dy < height; ++dy)
+        {
+            for (int dx = 0; dx < width; ++dx)
+            {
+                if (grid[LinearIndex(x + dx, y + dy, columnCount)])
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool CompareForPlacement(const WorkItem& left, const WorkItem& right)
+    {
+        if (left.phase != right.phase) return left.phase < right.phase;
+        const int leftArea = left.width * left.height;
+        const int rightArea = right.width * right.height;
+        if (leftArea != rightArea) return leftArea > rightArea;
+        if (left.height != right.height) return left.height > right.height;
+        if (left.width != right.width) return left.width > right.width;
+        if (left.sourceIndex != right.sourceIndex) return left.sourceIndex < right.sourceIndex;
+        return left.key < right.key;
+    }
+
+    bool FindRowMajorFit(const std::vector<bool>& grid, int columnCount, int rowCount, int width, int height, int& outX, int& outY)
+    {
+        const int maxRow = rowCount - height;
+        const int maxColumn = columnCount - width;
+        for (int row = 0; row <= maxRow; ++row)
+        {
+            for (int column = 0; column <= maxColumn; ++column)
+            {
+                if (RegionEmpty(grid, columnCount, column, row, width, height))
+                {
+                    outX = column;
+                    outY = row;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    bool FindColumnMajorFit(const std::vector<bool>& grid, int columnCount, int rowCount, int width, int height, int& outX, int& outY)
+    {
+        const int maxRow = rowCount - height;
+        const int maxColumn = columnCount - width;
+        for (int column = 0; column <= maxColumn; ++column)
+        {
+            for (int row = 0; row <= maxRow; ++row)
+            {
+                if (RegionEmpty(grid, columnCount, column, row, width, height))
+                {
+                    outX = column;
+                    outY = row;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    bool PlaceForPhase(std::vector<bool>& grid, int columnCount, int rowCount, WorkItem& item)
+    {
+        int x = 0;
+        int y = 0;
+        const bool found = item.phase == PHASE_TALL
+            ? FindColumnMajorFit(grid, columnCount, rowCount, item.width, item.height, x, y)
+            : FindRowMajorFit(grid, columnCount, rowCount, item.width, item.height, x, y);
+        if (!found)
+        {
+            return false;
+        }
+        item.targetX = x;
+        item.targetY = y;
+        for (int dy = 0; dy < item.height; ++dy)
+        {
+            for (int dx = 0; dx < item.width; ++dx)
+            {
+                grid[LinearIndex(x + dx, y + dy, columnCount)] = true;
+            }
+        }
+        return true;
+    }
+
+    // Pass 1: place wide and tall items only; 1x1 fillers handled by pass 2+.
+    bool BuildPass1Layout(Layout& layout, int columnCount, int rowCount)
+    {
+        std::sort(layout.items.begin(), layout.items.end(), CompareForPlacement);
+        std::vector<bool> grid(columnCount * rowCount, false);
+        for (WorkItem& item : layout.items)
+        {
+            if (item.phase == PHASE_FILLER)
+            {
+                continue;
+            }
+            if (!PlaceForPhase(grid, columnCount, rowCount, item))
+            {
+                return false;
+            }
+        }
+        // Tentatively assign 1x1s top-left so the layout is complete even if
+        // pass 2 is not adopted; this keeps the scorer comparable across passes.
+        for (WorkItem& item : layout.items)
+        {
+            if (item.phase != PHASE_FILLER)
+            {
+                continue;
+            }
+            if (!PlaceForPhase(grid, columnCount, rowCount, item))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Detect 1x1 cells that are surrounded by non-filler items (or grid borders)
+    // on at least three sides; these are the "holes" pass 2 targets first.
+    bool IsHoleCell(const std::vector<DWORD>& grid, int columnCount, int rowCount, int x, int y)
+    {
+        const std::array<std::pair<int, int>, 4> deltas{ { {1, 0}, {-1, 0}, {0, 1}, {0, -1} } };
+        int closed = 0;
+        for (const auto& d : deltas)
+        {
+            const int nx = x + d.first;
+            const int ny = y + d.second;
+            if (nx < 0 || ny < 0 || nx >= columnCount || ny >= rowCount)
+            {
+                ++closed;
+                continue;
+            }
+            if (grid[LinearIndex(nx, ny, columnCount)] != 0)
+            {
+                ++closed;
+            }
+        }
+        return closed >= 3;
+    }
+
+    void StampLayoutGrid(std::vector<DWORD>& grid, int columnCount, const Layout& layout, bool onlyNonFillers)
+    {
+        std::fill(grid.begin(), grid.end(), DWORD{ 0 });
+        for (const WorkItem& item : layout.items)
+        {
+            if (onlyNonFillers && item.phase == PHASE_FILLER)
+            {
+                continue;
+            }
+            StampOccupancy(grid, columnCount, item.targetX, item.targetY, item.width, item.height, item.key);
+        }
+    }
+
+    // Pass 2: re-place 1x1 items, preferring internal holes first then row-major
+    // fill. Operates on a copy of the pass 1 layout.
+    bool BuildPass2Layout(const Layout& base, Layout& out, int columnCount, int rowCount)
+    {
+        out = base;
+        std::vector<DWORD> grid(columnCount * rowCount, 0);
+        StampLayoutGrid(grid, columnCount, out, /*onlyNonFillers*/ true);
+
+        std::vector<int> holeIndices;
+        holeIndices.reserve(static_cast<size_t>(columnCount) * static_cast<size_t>(rowCount));
+        for (int y = 0; y < rowCount; ++y)
+        {
+            for (int x = 0; x < columnCount; ++x)
+            {
+                if (grid[LinearIndex(x, y, columnCount)] != 0)
+                {
+                    continue;
+                }
+                if (IsHoleCell(grid, columnCount, rowCount, x, y))
+                {
+                    holeIndices.push_back(LinearIndex(x, y, columnCount));
+                }
+            }
+        }
+
+        std::vector<WorkItem*> fillers;
+        fillers.reserve(out.items.size());
+        for (WorkItem& item : out.items)
+        {
+            if (item.phase == PHASE_FILLER)
+            {
+                fillers.push_back(&item);
+            }
+        }
+        std::sort(fillers.begin(), fillers.end(), [](const WorkItem* a, const WorkItem* b)
+        {
+            if (a->sourceIndex != b->sourceIndex) return a->sourceIndex < b->sourceIndex;
+            return a->key < b->key;
+        });
+
+        size_t fillerCursor = 0;
+        for (int holeLinear : holeIndices)
+        {
+            if (fillerCursor >= fillers.size()) break;
+            const int hx = holeLinear % columnCount;
+            const int hy = holeLinear / columnCount;
+            WorkItem* item = fillers[fillerCursor++];
+            item->targetX = hx;
+            item->targetY = hy;
+            grid[LinearIndex(hx, hy, columnCount)] = item->key;
+        }
+
+        // Remaining fillers: row-major fit into whatever empty cells are left.
+        for (; fillerCursor < fillers.size(); ++fillerCursor)
+        {
+            WorkItem* item = fillers[fillerCursor];
+            int x = 0;
+            int y = 0;
+            bool placed = false;
+            for (int row = 0; row < rowCount && !placed; ++row)
+            {
+                for (int column = 0; column < columnCount && !placed; ++column)
+                {
+                    if (grid[LinearIndex(column, row, columnCount)] == 0)
+                    {
+                        x = column;
+                        y = row;
+                        placed = true;
+                    }
+                }
+            }
+            if (!placed)
+            {
+                return false;
+            }
+            item->targetX = x;
+            item->targetY = y;
+            grid[LinearIndex(x, y, columnCount)] = item->key;
+        }
+        return true;
+    }
+
+    // Pass 3: keep pass 2 cells, reassign which 1x1 lands in each cell so items
+    // with the same groupKey end up adjacent in row-major traversal order.
+    bool BuildPass3Layout(const Layout& base, Layout& out, int columnCount, int rowCount)
+    {
+        out = base;
+
+        struct Cell { int x; int y; };
+        std::vector<Cell> fillerCells;
+        std::vector<WorkItem*> fillers;
+        fillerCells.reserve(out.items.size());
+        fillers.reserve(out.items.size());
+        for (WorkItem& item : out.items)
+        {
+            if (item.phase != PHASE_FILLER) continue;
+            fillerCells.push_back({ item.targetX, item.targetY });
+            fillers.push_back(&item);
+        }
+
+        std::sort(fillerCells.begin(), fillerCells.end(), [columnCount](const Cell& a, const Cell& b)
+        {
+            return LinearIndex(a.x, a.y, columnCount) < LinearIndex(b.x, b.y, columnCount);
+        });
+
+        std::sort(fillers.begin(), fillers.end(), [](const WorkItem* a, const WorkItem* b)
+        {
+            if (a->groupKey != b->groupKey) return a->groupKey < b->groupKey;
+            if (a->sourceIndex != b->sourceIndex) return a->sourceIndex < b->sourceIndex;
+            return a->key < b->key;
+        });
+
+        if (fillers.size() != fillerCells.size())
+        {
+            return false;
+        }
+        for (size_t i = 0; i < fillers.size(); ++i)
+        {
+            fillers[i]->targetX = fillerCells[i].x;
+            fillers[i]->targetY = fillerCells[i].y;
+        }
+        (void)rowCount;
+        return true;
+    }
+
+    bool ValidateLayout(const Layout& layout, int columnCount, int rowCount)
+    {
+        if (columnCount <= 0 || rowCount <= 0) return false;
+        std::vector<bool> grid(columnCount * rowCount, false);
+        int expected = 0;
+        int occupied = 0;
+        for (const WorkItem& item : layout.items)
+        {
+            if (item.width < MIN_ITEM_SIZE || item.width > MAX_ITEM_SIZE) return false;
+            if (item.height < MIN_ITEM_SIZE || item.height > MAX_ITEM_SIZE) return false;
+            if (!FitsInBounds(item.targetX, item.targetY, item.width, item.height, columnCount, rowCount)) return false;
+            expected += item.width * item.height;
+            for (int dy = 0; dy < item.height; ++dy)
+            {
+                for (int dx = 0; dx < item.width; ++dx)
+                {
+                    const int index = LinearIndex(item.targetX + dx, item.targetY + dy, columnCount);
+                    if (grid[index]) return false;
+                    grid[index] = true;
+                    ++occupied;
+                }
+            }
+        }
+        return expected == occupied;
+    }
+
+    int CountHolesAndCompactness(const Layout& layout, int columnCount, int rowCount, int& compactness)
+    {
+        std::vector<DWORD> grid(columnCount * rowCount, 0);
+        StampLayoutGrid(grid, columnCount, layout, /*onlyNonFillers*/ false);
+
+        compactness = 0;
+        int bottomMostUsed = 0;
+        for (const WorkItem& item : layout.items)
+        {
+            const int bottom = item.targetY + item.height;
+            compactness += bottom;
+            if (bottom > bottomMostUsed) bottomMostUsed = bottom;
+        }
+
+        int holes = 0;
+        for (int y = 0; y < bottomMostUsed; ++y)
+        {
+            for (int x = 0; x < columnCount; ++x)
+            {
+                if (grid[LinearIndex(x, y, columnCount)] != 0) continue;
+                if (IsHoleCell(grid, columnCount, rowCount, x, y)) ++holes;
+            }
+        }
+        return holes;
+    }
+
+    int ComputeAdjacencyMismatch(const Layout& layout, int columnCount, int rowCount)
+    {
+        std::vector<int> groupGrid(columnCount * rowCount, -1);
+        std::vector<bool> isFiller(columnCount * rowCount, false);
+        for (const WorkItem& item : layout.items)
+        {
+            if (item.phase != PHASE_FILLER) continue;
+            const int idx = LinearIndex(item.targetX, item.targetY, columnCount);
+            groupGrid[idx] = item.groupKey;
+            isFiller[idx] = true;
+        }
+
+        const std::array<std::pair<int, int>, 4> deltas{ { {1, 0}, {-1, 0}, {0, 1}, {0, -1} } };
+        int mismatches = 0;
+        for (int y = 0; y < rowCount; ++y)
+        {
+            for (int x = 0; x < columnCount; ++x)
+            {
+                const int idx = LinearIndex(x, y, columnCount);
+                if (!isFiller[idx]) continue;
+                for (const auto& d : deltas)
+                {
+                    const int nx = x + d.first;
+                    const int ny = y + d.second;
+                    if (nx < 0 || ny < 0 || nx >= columnCount || ny >= rowCount) continue;
+                    const int nidx = LinearIndex(nx, ny, columnCount);
+                    if (!isFiller[nidx]) continue;
+                    if (groupGrid[nidx] != groupGrid[idx]) ++mismatches;
+                }
+            }
+        }
+        return mismatches / 2;
+    }
+
+    int ComputeLargestEmptyRectangle(const Layout& layout, int columnCount, int rowCount)
+    {
+        std::vector<bool> occupied(columnCount * rowCount, false);
+        for (const WorkItem& item : layout.items)
+        {
+            for (int dy = 0; dy < item.height; ++dy)
+            {
+                for (int dx = 0; dx < item.width; ++dx)
+                {
+                    occupied[LinearIndex(item.targetX + dx, item.targetY + dy, columnCount)] = true;
+                }
+            }
+        }
+
+        std::vector<int> heights(columnCount, 0);
+        int best = 0;
+        for (int y = 0; y < rowCount; ++y)
+        {
+            for (int x = 0; x < columnCount; ++x)
+            {
+                heights[x] = occupied[LinearIndex(x, y, columnCount)] ? 0 : heights[x] + 1;
+            }
+            // Largest-rectangle-in-histogram for this row.
+            std::vector<int> stack;
+            stack.reserve(static_cast<size_t>(columnCount) + 1);
+            for (int x = 0; x <= columnCount; ++x)
+            {
+                const int h = x == columnCount ? 0 : heights[x];
+                while (!stack.empty() && heights[stack.back()] > h)
+                {
+                    const int top = stack.back();
+                    stack.pop_back();
+                    const int width = stack.empty() ? x : x - stack.back() - 1;
+                    const int area = heights[top] * width;
+                    if (area > best) best = area;
+                }
+                stack.push_back(x);
+            }
+        }
+        return best;
+    }
+
+    int ScoreLayout(const Layout& layout, int columnCount, int rowCount, int moveCount)
+    {
+        int compactness = 0;
+        const int holes = CountHolesAndCompactness(layout, columnCount, rowCount, compactness);
+        const int mismatches = ComputeAdjacencyMismatch(layout, columnCount, rowCount);
+        const int largestRect = ComputeLargestEmptyRectangle(layout, columnCount, rowCount);
+        return compactness * W_COMPACTNESS
+            + holes * W_HOLE
+            + mismatches * W_ADJACENCY
+            - largestRect * W_LARGEST_RECT
+            + moveCount * W_MOVES;
+    }
+
+    int CountMovesNeeded(const Layout& layout)
+    {
+        int moves = 0;
+        for (const WorkItem& item : layout.items)
+        {
+            if (!ItemAtTarget(item)) ++moves;
+        }
+        return moves;
+    }
+
+    WorkItem* FindByKey(std::vector<WorkItem>& items, DWORD key)
+    {
+        for (WorkItem& item : items)
+        {
+            if (item.key == key) return &item;
+        }
+        return nullptr;
+    }
+
+    DWORD FindTargetBlocker(const std::vector<DWORD>& grid, int columnCount, const WorkItem& item)
+    {
+        for (int dy = 0; dy < item.height; ++dy)
+        {
+            for (int dx = 0; dx < item.width; ++dx)
+            {
+                const DWORD cell = grid[LinearIndex(item.targetX + dx, item.targetY + dy, columnCount)];
+                if (cell != 0 && cell != item.key) return cell;
+            }
+        }
+        return 0;
+    }
+
+    bool FindTemporarySlot(const std::vector<DWORD>& grid, const std::vector<bool>& planned, int columnCount, int rowCount, const WorkItem& item, int& outX, int& outY)
+    {
+        const int maxRow = rowCount - item.height;
+        const int maxColumn = columnCount - item.width;
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            const bool avoidPlanned = pass == 0;
+            for (int row = maxRow; row >= 0; --row)
+            {
+                for (int column = maxColumn; column >= 0; --column)
+                {
+                    if (column == item.sourceX && row == item.sourceY) continue;
+                    bool ok = true;
+                    for (int dy = 0; dy < item.height && ok; ++dy)
+                    {
+                        for (int dx = 0; dx < item.width && ok; ++dx)
+                        {
+                            const int index = LinearIndex(column + dx, row + dy, columnCount);
+                            if (avoidPlanned && planned[index]) { ok = false; break; }
+                            const DWORD cell = grid[index];
+                            if (cell != 0 && cell != item.key) { ok = false; break; }
+                        }
+                    }
+                    if (ok)
+                    {
+                        outX = column;
+                        outY = row;
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    void EmitMove(std::vector<PlannerMove>& moves, const PlannerSettings& settings, WorkItem& item, int newX, int newY, int columnCount, std::vector<DWORD>& grid)
+    {
+        StampOccupancy(grid, columnCount, item.sourceX, item.sourceY, item.width, item.height, 0);
+        item.sourceX = newX;
+        item.sourceY = newY;
+        StampOccupancy(grid, columnCount, item.sourceX, item.sourceY, item.width, item.height, item.key);
+        moves.push_back({ item.key, LinearIndex(newX, newY, columnCount) + settings.equipmentOffset });
+    }
+
+    bool GenerateMoves(Layout workingLayout, int columnCount, int rowCount, const PlannerSettings& settings, std::vector<PlannerMove>& outMoves)
+    {
+        std::vector<WorkItem>& items = workingLayout.items;
+        std::vector<DWORD> grid(columnCount * rowCount, 0);
+        std::vector<bool> planned(columnCount * rowCount, false);
+        for (const WorkItem& item : items)
+        {
+            StampOccupancy(grid, columnCount, item.sourceX, item.sourceY, item.width, item.height, item.key);
+            for (int dy = 0; dy < item.height; ++dy)
+            {
+                for (int dx = 0; dx < item.width; ++dx)
+                {
+                    planned[LinearIndex(item.targetX + dx, item.targetY + dy, columnCount)] = true;
+                }
+            }
+        }
+
+        const size_t safetyCap = items.size() * static_cast<size_t>(columnCount) * static_cast<size_t>(rowCount) + 1;
+        while (true)
+        {
+            if (outMoves.size() > safetyCap) return false;
+
+            bool pending = false;
+            bool moved = false;
+            for (WorkItem& item : items)
+            {
+                if (ItemAtTarget(item)) continue;
+                pending = true;
+                if (!RegionMatches(grid, columnCount, item.targetX, item.targetY, item.width, item.height, item.key)) continue;
+                EmitMove(outMoves, settings, item, item.targetX, item.targetY, columnCount, grid);
+                moved = true;
+                break;
+            }
+            if (!pending) return true;
+            if (moved) continue;
+
+            // No direct move possible: evict one blocker into a temp slot.
+            for (WorkItem& item : items)
+            {
+                if (ItemAtTarget(item)) continue;
+                const DWORD blockerKey = FindTargetBlocker(grid, columnCount, item);
+                if (blockerKey == 0) continue;
+                WorkItem* pBlocker = FindByKey(items, blockerKey);
+                if (pBlocker == nullptr) continue;
+                int tx = 0;
+                int ty = 0;
+                if (!FindTemporarySlot(grid, planned, columnCount, rowCount, *pBlocker, tx, ty)) continue;
+                EmitMove(outMoves, settings, *pBlocker, tx, ty, columnCount, grid);
+                moved = true;
+                break;
+            }
+            if (!moved) return false;
+        }
+    }
+
+    bool SimulateMoves(const Layout& plannedLayout, int columnCount, int rowCount, const PlannerSettings& settings, const std::vector<PlannerMove>& moves)
+    {
+        if (columnCount <= 0 || rowCount <= 0) return false;
+        struct SimItem { DWORD key; int x; int y; int tx; int ty; int width; int height; };
+        std::vector<SimItem> sim;
+        sim.reserve(plannedLayout.items.size());
+        std::vector<DWORD> grid(columnCount * rowCount, 0);
+        for (const WorkItem& item : plannedLayout.items)
+        {
+            if (!FitsInBounds(item.sourceX, item.sourceY, item.width, item.height, columnCount, rowCount)) return false;
+            for (int dy = 0; dy < item.height; ++dy)
+            {
+                for (int dx = 0; dx < item.width; ++dx)
+                {
+                    const int index = LinearIndex(item.sourceX + dx, item.sourceY + dy, columnCount);
+                    if (grid[index] != 0) return false;
+                    grid[index] = item.key;
+                }
+            }
+            sim.push_back({ item.key, item.sourceX, item.sourceY, item.targetX, item.targetY, item.width, item.height });
+        }
+
+        for (const PlannerMove& move : moves)
+        {
+            SimItem* pItem = nullptr;
+            for (SimItem& candidate : sim)
+            {
+                if (candidate.key == move.itemKey) { pItem = &candidate; break; }
+            }
+            if (pItem == nullptr) return false;
+            const int linear = move.targetIndex - settings.equipmentOffset;
+            if (linear < 0 || linear >= columnCount * rowCount) return false;
+            const int tx = linear % columnCount;
+            const int ty = linear / columnCount;
+            if (!FitsInBounds(tx, ty, pItem->width, pItem->height, columnCount, rowCount)) return false;
+            for (int dy = 0; dy < pItem->height; ++dy)
+            {
+                for (int dx = 0; dx < pItem->width; ++dx)
+                {
+                    const DWORD cell = grid[LinearIndex(tx + dx, ty + dy, columnCount)];
+                    if (cell != 0 && cell != pItem->key) return false;
+                }
+            }
+            StampOccupancy(grid, columnCount, pItem->x, pItem->y, pItem->width, pItem->height, 0);
+            pItem->x = tx;
+            pItem->y = ty;
+            StampOccupancy(grid, columnCount, pItem->x, pItem->y, pItem->width, pItem->height, pItem->key);
+        }
+
+        for (const SimItem& s : sim)
+        {
+            if (s.x != s.tx || s.y != s.ty) return false;
+        }
+        return true;
+    }
+
+    Layout BuildCurrentLayout(const std::vector<PlannerItem>& items)
+    {
+        Layout layout;
+        layout.items.reserve(items.size());
+        for (const PlannerItem& src : items)
+        {
+            WorkItem w;
+            w.key = src.key;
+            w.sourceIndex = src.sourceIndex;
+            w.sourceX = src.sourceX;
+            w.sourceY = src.sourceY;
+            w.targetX = src.sourceX;
+            w.targetY = src.sourceY;
+            w.width = src.width;
+            w.height = src.height;
+            w.groupKey = src.groupKey;
+            w.phase = ClassifyPhase(src.width, src.height);
+            layout.items.push_back(w);
+        }
+        return layout;
+    }
+
+    bool TryPlan(const Layout& candidate, int columnCount, int rowCount, const PlannerSettings& settings, std::vector<PlannerMove>& outMoves)
+    {
+        outMoves.clear();
+        if (!ValidateLayout(candidate, columnCount, rowCount)) return false;
+        if (!GenerateMoves(candidate, columnCount, rowCount, settings, outMoves)) return false;
+        if (outMoves.empty()) return false;
+        if (!SimulateMoves(candidate, columnCount, rowCount, settings, outMoves)) return false;
+        return true;
+    }
+}
+
+bool IsSupportedItemSize(int width, int height)
+{
+    return width >= MIN_ITEM_SIZE && width <= MAX_ITEM_SIZE
+        && height >= MIN_ITEM_SIZE && height <= MAX_ITEM_SIZE;
+}
+
+PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int rowCount, const PlannerSettings& settings)
+{
+    PlannerResult result;
+    result.hasPlan = false;
+
+    if (columnCount <= 0 || rowCount <= 0) return result;
+    for (const PlannerItem& it : items)
+    {
+        if (!IsSupportedItemSize(it.width, it.height)) return result;
+        if (!FitsInBounds(it.sourceX, it.sourceY, it.width, it.height, columnCount, rowCount)) return result;
+    }
+
+    Layout current = BuildCurrentLayout(items);
+    if (!ValidateLayout(current, columnCount, rowCount)) return result;
+    const int currentScore = ScoreLayout(current, columnCount, rowCount, /*moves*/ 0);
+
+    Layout pass1 = current;
+    if (!BuildPass1Layout(pass1, columnCount, rowCount)) return result;
+    if (!ValidateLayout(pass1, columnCount, rowCount)) return result;
+    int pass1Score = ScoreLayout(pass1, columnCount, rowCount, CountMovesNeeded(pass1));
+
+    Layout best = pass1;
+    int bestScore = pass1Score;
+    int adoptedPasses = 1;
+
+    Layout pass2;
+    if (adoptedPasses < MAX_PLAN_PASSES && BuildPass2Layout(best, pass2, columnCount, rowCount)
+        && ValidateLayout(pass2, columnCount, rowCount))
+    {
+        const int score = ScoreLayout(pass2, columnCount, rowCount, CountMovesNeeded(pass2));
+        if (score < bestScore - settings.passProgressionThreshold)
+        {
+            best = pass2;
+            bestScore = score;
+            ++adoptedPasses;
+        }
+    }
+
+    Layout pass3;
+    if (adoptedPasses < MAX_PLAN_PASSES && BuildPass3Layout(best, pass3, columnCount, rowCount)
+        && ValidateLayout(pass3, columnCount, rowCount))
+    {
+        const int score = ScoreLayout(pass3, columnCount, rowCount, CountMovesNeeded(pass3));
+        if (score < bestScore - settings.passProgressionThreshold)
+        {
+            best = pass3;
+            bestScore = score;
+            ++adoptedPasses;
+        }
+    }
+
+    if (bestScore >= currentScore - settings.acceptanceThreshold) return result;
+
+    std::vector<PlannerMove> moves;
+    if (!TryPlan(best, columnCount, rowCount, settings, moves))
+    {
+        // A later pass produced an unrealizable sequence; fall back to pass 1
+        // (which is always realizable for any layout the validator accepted).
+        if (adoptedPasses == 1 || !TryPlan(pass1, columnCount, rowCount, settings, moves))
+        {
+            return result;
+        }
+    }
+
+    result.hasPlan = true;
+    result.moves = std::move(moves);
+    return result;
+}
+
+} // namespace Sorting
+} // namespace Inventory
+} // namespace UI
