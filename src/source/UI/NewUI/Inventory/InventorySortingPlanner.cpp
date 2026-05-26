@@ -38,9 +38,12 @@ namespace
     // Per-item logs (snapshot, sort order, per-placement). Noisy; gated also
     // to the first convergence iteration only at the call site.
     constexpr bool kPlannerDebugVerbose = true;
-    // Diagnostic-only: logged in [ArrangeScore] but NOT applied to ScoreLayout
-    // until logs prove the earlier pipeline stages are correct.
-    constexpr int kShapeFragmentationWeight = 0;
+    // Applied in ScoreLayout: each (width, height) shape group contributes
+    // (boundingBoxArea - n*width*height) * kShapeFragmentationWeight to the
+    // total. Heavy weight because a single stranded 2x3 or 1x3 typically
+    // produces fragmentation ~10..20, and we want it to dominate the
+    // small-grain hole / adjacency wins of any layout that strands it.
+    constexpr int kShapeFragmentationWeight = 80;
 
     // Maximum in-memory planning iterations. Each iteration feeds the previous
     // iteration's target layout back as the next iteration's source so the
@@ -264,6 +267,22 @@ namespace
             if (verbose) LogPass1Placement(rank, item);
             ++rank;
         }
+        // Safety log: count structural vs filler items placed in pass 1. The
+        // two-loop layout below guarantees that no 1x1 lands before all
+        // structural items have their target set; an [ArrangeError] line here
+        // would mean a structural placement silently failed.
+        if (verbose)
+        {
+            int structurals = 0;
+            int fillers = 0;
+            for (const WorkItem& it : layout.items)
+            {
+                if (it.phase == PHASE_FILLER) ++fillers;
+                else ++structurals;
+            }
+            PlannerLog(L"[ArrangePass1Summary] structurals=%d fillers=%d", structurals, fillers);
+        }
+
         // Tentatively assign 1x1s top-left so the layout is complete even if
         // pass 2 is not adopted; this keeps the scorer comparable across passes.
         for (WorkItem& item : layout.items)
@@ -749,10 +768,12 @@ namespace
         const int holes = CountHolesAndCompactness(layout, columnCount, rowCount, compactness);
         const int mismatches = ComputeAdjacencyMismatch(layout, columnCount, rowCount);
         const int largestRect = ComputeLargestEmptyRectangle(layout, columnCount, rowCount);
+        const int shapeFrag = ComputeShapeFragmentation(layout);
         return compactness * W_COMPACTNESS
             + holes * W_HOLE
             + mismatches * W_ADJACENCY
             - largestRect * W_LARGEST_RECT
+            + shapeFrag * kShapeFragmentationWeight
             + moveCount * W_MOVES;
     }
 
