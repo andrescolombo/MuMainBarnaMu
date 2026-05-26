@@ -36,6 +36,12 @@ namespace
     // Flip to false to silence planner diagnostics without removing call sites.
     constexpr bool kPlannerDebugLogging = true;
 
+    // Maximum in-memory planning iterations. Each iteration feeds the previous
+    // iteration's target layout back as the next iteration's source so the
+    // sort tiebreaker (sourceIndex) can stabilise without the user clicking
+    // arrange multiple times.
+    constexpr int kMaxArrangeConvergenceIterations = 8;
+
     enum Phase
     {
         PHASE_WIDE = 0,
@@ -557,11 +563,34 @@ namespace
         return matches;
     }
 
-    void PlannerLog(const wchar_t* fmt, int a = 0, int b = 0, int c = 0, int d = 0)
+    void PlannerLog(const wchar_t* fmt, int a = 0, int b = 0, int c = 0, int d = 0, int e = 0, int f = 0)
     {
         if (!kPlannerDebugLogging) return;
         if (g_ConsoleDebug == nullptr) return;
-        g_ConsoleDebug->Write(MCD_NORMAL, fmt, a, b, c, d);
+        g_ConsoleDebug->Write(MCD_NORMAL, fmt, a, b, c, d, e, f);
+    }
+
+    // Diagnostic: number of pairs (a, b) where a precedes b in row-major
+    // traversal yet a is strictly shorter than b. A canonical height-first
+    // layout has zero violations; the messier the layout, the higher the
+    // count. Cheap to compute (items in a 8x8 inventory are <= 64).
+    int CountHeightOrderViolations(const Layout& layout, int columnCount)
+    {
+        int violations = 0;
+        const size_t n = layout.items.size();
+        for (size_t i = 0; i < n; ++i)
+        {
+            const WorkItem& a = layout.items[i];
+            const int posA = LinearIndex(a.targetX, a.targetY, columnCount);
+            for (size_t j = i + 1; j < n; ++j)
+            {
+                const WorkItem& b = layout.items[j];
+                const int posB = LinearIndex(b.targetX, b.targetY, columnCount);
+                if (posA < posB && a.height < b.height) ++violations;
+                else if (posB < posA && b.height < a.height) ++violations;
+            }
+        }
+        return violations;
     }
 
     int ComputeLargestEmptyRectangle(const Layout& layout, int columnCount, int rowCount)
@@ -806,6 +835,79 @@ namespace
         return true;
     }
 
+    struct PipelineRun
+    {
+        Layout best;
+        int structuralScore;    // ScoreLayout(best, moves=0)
+        int groupScore;         // ComputeOneByOneGroupingScore(best)
+        int adoptedPasses;      // 1..MAX_PLAN_PASSES
+    };
+
+    // Runs the existing pass1/2/3 pipeline against a single "current" layout
+    // and returns the best target found. Does not touch the original snapshot
+    // or emit moves; the caller is responsible for chaining iterations.
+    bool RunPassPipeline(const Layout& currentLayout, int columnCount, int rowCount, const PlannerSettings& settings, PipelineRun& out, int iterIndex)
+    {
+        Layout pass1 = currentLayout;
+        if (!BuildPass1Layout(pass1, columnCount, rowCount))
+        {
+            PlannerLog(L"[ArrangeSort] iter=%d pass1 build failed", iterIndex);
+            return false;
+        }
+        if (!ValidateLayout(pass1, columnCount, rowCount))
+        {
+            PlannerLog(L"[ArrangeSort] iter=%d pass1 validate failed", iterIndex);
+            return false;
+        }
+        int pass1Score = ScoreLayout(pass1, columnCount, rowCount, CountMovesNeeded(pass1));
+        int pass1Group = ComputeOneByOneGroupingScore(pass1, columnCount, rowCount);
+
+        Layout best = pass1;
+        int bestScore = pass1Score;
+        int bestGroup = pass1Group;
+        int adopted = 1;
+
+        Layout pass2;
+        if (adopted < MAX_PLAN_PASSES && BuildPass2Layout(best, pass2, columnCount, rowCount)
+            && ValidateLayout(pass2, columnCount, rowCount))
+        {
+            const int score = ScoreLayout(pass2, columnCount, rowCount, CountMovesNeeded(pass2));
+            const int group = ComputeOneByOneGroupingScore(pass2, columnCount, rowCount);
+            const bool ok = (score < bestScore - settings.passProgressionThreshold)
+                || (group < bestGroup && score <= bestScore);
+            if (ok)
+            {
+                best = pass2;
+                bestScore = score;
+                bestGroup = group;
+                ++adopted;
+            }
+        }
+
+        Layout pass3;
+        if (adopted < MAX_PLAN_PASSES && BuildPass3Layout(best, pass3, columnCount, rowCount)
+            && ValidateLayout(pass3, columnCount, rowCount))
+        {
+            const int score = ScoreLayout(pass3, columnCount, rowCount, CountMovesNeeded(pass3));
+            const int group = ComputeOneByOneGroupingScore(pass3, columnCount, rowCount);
+            const bool ok = (score < bestScore - settings.passProgressionThreshold)
+                || (group < bestGroup && score <= bestScore);
+            if (ok)
+            {
+                best = pass3;
+                bestScore = score;
+                bestGroup = group;
+                ++adopted;
+            }
+        }
+
+        out.best = std::move(best);
+        out.structuralScore = ScoreLayout(out.best, columnCount, rowCount, /*moves*/ 0);
+        out.groupScore = bestGroup;
+        out.adoptedPasses = adopted;
+        return true;
+    }
+
     Layout BuildCurrentLayout(const std::vector<PlannerItem>& items)
     {
         Layout layout;
@@ -857,106 +959,130 @@ PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int r
         if (!FitsInBounds(it.sourceX, it.sourceY, it.width, it.height, columnCount, rowCount)) return result;
     }
 
-    Layout current = BuildCurrentLayout(items);
-    if (!ValidateLayout(current, columnCount, rowCount)) return result;
-    const int currentScore = ScoreLayout(current, columnCount, rowCount, /*moves*/ 0);
-    const int currentGroupScore = ComputeOneByOneGroupingScore(current, columnCount, rowCount);
-    const int currentAdjMatches = CountSameGroupAdjacencies(current, columnCount, rowCount);
-    PlannerLog(L"[ArrangeSort] current score=%d group=%d adj=%d", currentScore, currentGroupScore, currentAdjMatches);
+    Layout original = BuildCurrentLayout(items);
+    if (!ValidateLayout(original, columnCount, rowCount)) return result;
+    const int originalScore = ScoreLayout(original, columnCount, rowCount, /*moves*/ 0);
+    const int originalGroup = ComputeOneByOneGroupingScore(original, columnCount, rowCount);
+    const int originalViol = CountHeightOrderViolations(original, columnCount);
+    PlannerLog(L"[ArrangeSort] start score=%d group=%d viol=%d", originalScore, originalGroup, originalViol);
 
-    Layout pass1 = current;
-    if (!BuildPass1Layout(pass1, columnCount, rowCount)) { PlannerLog(L"[ArrangeSort] pass1 build failed"); return result; }
-    if (!ValidateLayout(pass1, columnCount, rowCount)) { PlannerLog(L"[ArrangeSort] pass1 validate failed"); return result; }
-    int pass1Score = ScoreLayout(pass1, columnCount, rowCount, CountMovesNeeded(pass1));
-    int pass1Group = ComputeOneByOneGroupingScore(pass1, columnCount, rowCount);
-    PlannerLog(L"[ArrangeSort] pass1 score=%d group=%d moves=%d", pass1Score, pass1Group, CountMovesNeeded(pass1));
+    // Rolling virtual state: starts at the real snapshot, then each accepted
+    // iteration replaces its sourceX/Y with the previous candidate's targetX/Y.
+    // This is what lets the sort tiebreaker (sourceIndex) converge in memory
+    // instead of forcing the user to click arrange multiple times.
+    Layout virtualState = original;
+    int virtualStruct = originalScore;
+    int virtualGroup = originalGroup;
 
-    Layout best = pass1;
-    int bestScore = pass1Score;
-    int bestGroup = pass1Group;
-    int adoptedPasses = 1;
-
-    Layout pass2;
-    if (adoptedPasses < MAX_PLAN_PASSES && BuildPass2Layout(best, pass2, columnCount, rowCount)
-        && ValidateLayout(pass2, columnCount, rowCount))
+    // Per-item final target tracked across iterations. Initialised to the
+    // original positions so a do-nothing convergence ends with no moves.
+    std::vector<std::pair<DWORD, std::pair<int, int>>> finalTargets;
+    finalTargets.reserve(original.items.size());
+    for (const WorkItem& it : original.items)
     {
-        const int score = ScoreLayout(pass2, columnCount, rowCount, CountMovesNeeded(pass2));
-        const int group = ComputeOneByOneGroupingScore(pass2, columnCount, rowCount);
-        const bool improvesTotal = score < bestScore - settings.passProgressionThreshold;
-        const bool improvesGroupNoRegression = group < bestGroup && score <= bestScore;
-        PlannerLog(L"[ArrangeSort] pass2 score=%d group=%d totalOk=%d groupOk=%d", score, group, improvesTotal ? 1 : 0, improvesGroupNoRegression ? 1 : 0);
-        if (improvesTotal || improvesGroupNoRegression)
+        finalTargets.push_back({ it.key, { it.targetX, it.targetY } });
+    }
+
+    int converged = -1;
+    for (int iter = 0; iter < kMaxArrangeConvergenceIterations; ++iter)
+    {
+        PipelineRun run;
+        if (!RunPassPipeline(virtualState, columnCount, rowCount, settings, run, iter))
         {
-            best = pass2;
-            bestScore = score;
-            bestGroup = group;
-            ++adoptedPasses;
+            PlannerLog(L"[ArrangeSort] iter=%d pipeline aborted", iter);
+            break;
+        }
+
+        const int candStruct = run.structuralScore;
+        const int candGroup = run.groupScore;
+        const int candViol = CountHeightOrderViolations(run.best, columnCount);
+        const bool improvesStruct = candStruct < virtualStruct - settings.passProgressionThreshold;
+        const bool improvesGroupNoReg = candGroup < virtualGroup && candStruct <= virtualStruct;
+        const bool adopt = improvesStruct || improvesGroupNoReg;
+
+        PlannerLog(L"[ArrangeSort] iter=%d virtStruct=%d candStruct=%d candGroup=%d viol=%d adopt=%d",
+            iter, virtualStruct, candStruct, candGroup, candViol, adopt ? 1 : 0);
+
+        if (!adopt)
+        {
+            converged = iter;
+            break;
+        }
+
+        // Update finalTargets with this iteration's target positions.
+        for (const WorkItem& cand : run.best.items)
+        {
+            for (auto& entry : finalTargets)
+            {
+                if (entry.first == cand.key)
+                {
+                    entry.second.first = cand.targetX;
+                    entry.second.second = cand.targetY;
+                    break;
+                }
+            }
+        }
+
+        // Roll virtualState forward: source = previous target.
+        virtualState = run.best;
+        for (WorkItem& it : virtualState.items)
+        {
+            it.sourceX = it.targetX;
+            it.sourceY = it.targetY;
+            it.sourceIndex = LinearIndex(it.targetX, it.targetY, columnCount);
+        }
+        virtualStruct = candStruct;
+        virtualGroup = candGroup;
+    }
+    if (converged < 0) PlannerLog(L"[ArrangeSort] convergence cap reached");
+
+    // Build the delivery layout: original sources, converged targets.
+    Layout delivery = original;
+    for (WorkItem& dit : delivery.items)
+    {
+        for (const auto& entry : finalTargets)
+        {
+            if (entry.first == dit.key)
+            {
+                dit.targetX = entry.second.first;
+                dit.targetY = entry.second.second;
+                break;
+            }
         }
     }
-    else
+
+    if (!ValidateLayout(delivery, columnCount, rowCount))
     {
-        PlannerLog(L"[ArrangeSort] pass2 unavailable");
+        PlannerLog(L"[ArrangeSort] delivery validate failed");
+        return result;
     }
 
-    Layout pass3;
-    if (adoptedPasses < MAX_PLAN_PASSES && BuildPass3Layout(best, pass3, columnCount, rowCount)
-        && ValidateLayout(pass3, columnCount, rowCount))
-    {
-        const int score = ScoreLayout(pass3, columnCount, rowCount, CountMovesNeeded(pass3));
-        const int group = ComputeOneByOneGroupingScore(pass3, columnCount, rowCount);
-        // Pass 3 only reassigns which 1x1 lands in each cell. The total score
-        // barely moves; accept it as long as the grouping improves and no
-        // regression in the main score.
-        const bool improvesTotal = score < bestScore - settings.passProgressionThreshold;
-        const bool improvesGroupNoRegression = group < bestGroup && score <= bestScore;
-        PlannerLog(L"[ArrangeSort] pass3 score=%d group=%d totalOk=%d groupOk=%d", score, group, improvesTotal ? 1 : 0, improvesGroupNoRegression ? 1 : 0);
-        if (improvesTotal || improvesGroupNoRegression)
-        {
-            best = pass3;
-            bestScore = score;
-            bestGroup = group;
-            ++adoptedPasses;
-        }
-    }
-    else
-    {
-        PlannerLog(L"[ArrangeSort] pass3 unavailable");
-    }
-
-    // Acceptance: compare structural-vs-structural so a height-first reorder
-    // that requires many moves is not unfairly penalised. currentScore is
-    // already structural-only (computed with moves=0), so the symmetric
-    // comparison uses bestStructuralScore. A separate 1x1-grouping path
-    // catches pure-cleanup plans that don't shift the structural total.
-    const int bestStructuralScore = ScoreLayout(best, columnCount, rowCount, /*moves*/ 0);
-    const bool acceptByStructural = bestStructuralScore < currentScore - settings.acceptanceThreshold;
-    const bool acceptByGrouping = bestGroup < currentGroupScore - settings.oneByOneCleanupThreshold
-        && bestStructuralScore <= currentScore;
-    const bool acceptByTotal = bestScore < currentScore - settings.acceptanceThreshold;
-    PlannerLog(L"[ArrangeSort] accept: byTotal=%d byStruct=%d byGroup=%d struct=%d",
-        acceptByTotal ? 1 : 0, acceptByStructural ? 1 : 0, acceptByGrouping ? 1 : 0, bestStructuralScore);
-    if (!acceptByTotal && !acceptByStructural && !acceptByGrouping)
+    const int deliveryStruct = ScoreLayout(delivery, columnCount, rowCount, /*moves*/ 0);
+    const int deliveryGroup = ComputeOneByOneGroupingScore(delivery, columnCount, rowCount);
+    const int deliveryViol = CountHeightOrderViolations(delivery, columnCount);
+    const bool acceptByStruct = deliveryStruct < originalScore - settings.acceptanceThreshold;
+    const bool acceptByGroup = deliveryGroup < originalGroup - settings.oneByOneCleanupThreshold
+        && deliveryStruct <= originalScore;
+    PlannerLog(L"[ArrangeSort] final struct=%d group=%d viol=%d byStruct=%d byGroup=%d",
+        deliveryStruct, deliveryGroup, deliveryViol,
+        acceptByStruct ? 1 : 0, acceptByGroup ? 1 : 0);
+    if (!acceptByStruct && !acceptByGroup)
     {
         PlannerLog(L"[ArrangeSort] no plan adopted");
         return result;
     }
 
     std::vector<PlannerMove> moves;
-    if (!TryPlan(best, columnCount, rowCount, settings, moves))
+    if (!TryPlan(delivery, columnCount, rowCount, settings, moves))
     {
-        PlannerLog(L"[ArrangeSort] best plan unrealizable; falling back to pass1");
-        if (adoptedPasses == 1 || !TryPlan(pass1, columnCount, rowCount, settings, moves))
-        {
-            PlannerLog(L"[ArrangeSort] fallback also unrealizable");
-            return result;
-        }
+        PlannerLog(L"[ArrangeSort] delivery plan unrealizable");
+        return result;
     }
 
-    // Diagnostic move breakdown so failures in the field are debuggable.
     int oneByOneMoves = 0;
     for (const PlannerMove& m : moves)
     {
-        for (const WorkItem& w : best.items)
+        for (const WorkItem& w : delivery.items)
         {
             if (w.key != m.itemKey) continue;
             if (w.width == 1 && w.height == 1) ++oneByOneMoves;
