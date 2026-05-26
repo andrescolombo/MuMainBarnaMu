@@ -603,7 +603,7 @@ namespace
         return matches;
     }
 
-    void PlannerLog(const wchar_t* fmt, int a = 0, int b = 0, int c = 0, int d = 0, int e = 0, int f = 0)
+    void PlannerLog(const wchar_t* fmt, int a, int b, int c, int d, int e, int f)
     {
         if (!kPlannerDebugLogging) return;
         if (g_ConsoleDebug == nullptr) return;
