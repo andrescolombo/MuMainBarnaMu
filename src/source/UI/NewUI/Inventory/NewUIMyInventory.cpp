@@ -176,6 +176,28 @@ namespace
         return false;
     }
 
+    bool FindColumnMajorArrangeTarget(const std::vector<bool>& occupied, int columnCount, int rowCount, ArrangeItem& item)
+    {
+        const int maxRow = rowCount - item.height;
+        const int maxColumn = columnCount - item.width;
+        for (int column = 0; column <= maxColumn; ++column)
+        {
+            for (int row = 0; row <= maxRow; ++row)
+            {
+                if (!CanPlaceArrangeTarget(occupied, columnCount, rowCount, item, column, row))
+                {
+                    continue;
+                }
+
+                item.targetX = column;
+                item.targetY = row;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     void OccupyArrangeTargetCells(std::vector<bool>& occupied, int columnCount, const ArrangeItem& item)
     {
         for (int y = 0; y < item.height; ++y)
@@ -280,36 +302,74 @@ namespace
         return false;
     }
 
+    enum ArrangePhase
+    {
+        ARRANGE_PHASE_WIDE = 0,
+        ARRANGE_PHASE_TALL = 1,
+        ARRANGE_PHASE_FILLER = 2,
+    };
+
+    ArrangePhase GetArrangePhase(const ArrangeItem& item)
+    {
+        if (item.width > 1)
+        {
+            return ARRANGE_PHASE_WIDE;
+        }
+        if (item.height > 1)
+        {
+            return ARRANGE_PHASE_TALL;
+        }
+        return ARRANGE_PHASE_FILLER;
+    }
+
+    bool CompareArrangeItemsForPlacement(const ArrangeItem& left, const ArrangeItem& right)
+    {
+        const ArrangePhase leftPhase = GetArrangePhase(left);
+        const ArrangePhase rightPhase = GetArrangePhase(right);
+        if (leftPhase != rightPhase)
+        {
+            return leftPhase < rightPhase;
+        }
+
+        const int leftArea = GetArrangeArea(left);
+        const int rightArea = GetArrangeArea(right);
+        if (leftArea != rightArea)
+        {
+            return leftArea > rightArea;
+        }
+        if (left.height != right.height)
+        {
+            return left.height > right.height;
+        }
+        if (left.width != right.width)
+        {
+            return left.width > right.width;
+        }
+        if (left.sourceIndex != right.sourceIndex)
+        {
+            return left.sourceIndex < right.sourceIndex;
+        }
+        return left.key < right.key;
+    }
+
+    bool PlaceArrangeItemForPhase(std::vector<bool>& occupied, int columnCount, int rowCount, ArrangeItem& item)
+    {
+        if (GetArrangePhase(item) == ARRANGE_PHASE_TALL)
+        {
+            return FindColumnMajorArrangeTarget(occupied, columnCount, rowCount, item);
+        }
+        return FindFirstFitArrangeTarget(occupied, columnCount, rowCount, item);
+    }
+
     bool ComputeArrangeTargets(std::vector<ArrangeItem>& items, int columnCount, int rowCount)
     {
-        std::sort(items.begin(), items.end(), [](const ArrangeItem& left, const ArrangeItem& right)
-        {
-            const int leftArea = GetArrangeArea(left);
-            const int rightArea = GetArrangeArea(right);
-            if (leftArea != rightArea)
-            {
-                return leftArea > rightArea;
-            }
-            if (left.height != right.height)
-            {
-                return left.height > right.height;
-            }
-            if (left.width != right.width)
-            {
-                return left.width > right.width;
-            }
-            if (left.sourceIndex != right.sourceIndex)
-            {
-                return left.sourceIndex < right.sourceIndex;
-            }
-            return left.key < right.key;
-        });
+        std::sort(items.begin(), items.end(), CompareArrangeItemsForPlacement);
 
         std::vector<bool> occupied(columnCount * rowCount, false);
 
         for (ArrangeItem& item : items)
         {
-            if (!FindFirstFitArrangeTarget(occupied, columnCount, rowCount, item))
+            if (!PlaceArrangeItemForPhase(occupied, columnCount, rowCount, item))
             {
                 return false;
             }
@@ -376,6 +436,120 @@ namespace
                 return false;
             }
         }
+        return true;
+    }
+
+    bool SimulateArrangeMoveSequence(const std::vector<ArrangeItem>& items, int columnCount, int rowCount, const std::vector<SEASON3B::InventoryRearrangeMove>& moves)
+    {
+        struct SimulatedItem
+        {
+            DWORD key;
+            int x;
+            int y;
+            int targetX;
+            int targetY;
+            int width;
+            int height;
+        };
+
+        if (columnCount <= 0 || rowCount <= 0)
+        {
+            return false;
+        }
+
+        std::vector<SimulatedItem> simulated;
+        simulated.reserve(items.size());
+        std::vector<DWORD> grid(columnCount * rowCount, 0);
+
+        for (const ArrangeItem& item : items)
+        {
+            if (item.sourceX < 0 || item.sourceY < 0
+                || item.sourceX + item.width > columnCount
+                || item.sourceY + item.height > rowCount)
+            {
+                return false;
+            }
+            for (int y = 0; y < item.height; ++y)
+            {
+                for (int x = 0; x < item.width; ++x)
+                {
+                    const int index = GetArrangeIndex(item.sourceX + x, item.sourceY + y, columnCount);
+                    if (grid[index] != 0)
+                    {
+                        return false;
+                    }
+                    grid[index] = item.key;
+                }
+            }
+            simulated.push_back({ item.key, item.sourceX, item.sourceY, item.targetX, item.targetY, item.width, item.height });
+        }
+
+        for (const SEASON3B::InventoryRearrangeMove& move : moves)
+        {
+            SimulatedItem* pItem = nullptr;
+            for (SimulatedItem& candidate : simulated)
+            {
+                if (candidate.key == move.itemKey)
+                {
+                    pItem = &candidate;
+                    break;
+                }
+            }
+            if (pItem == nullptr)
+            {
+                return false;
+            }
+
+            const int targetLinear = move.targetIndex - MAX_EQUIPMENT;
+            if (targetLinear < 0 || targetLinear >= columnCount * rowCount)
+            {
+                return false;
+            }
+            const int targetX = targetLinear % columnCount;
+            const int targetY = targetLinear / columnCount;
+            if (targetX + pItem->width > columnCount || targetY + pItem->height > rowCount)
+            {
+                return false;
+            }
+
+            for (int y = 0; y < pItem->height; ++y)
+            {
+                for (int x = 0; x < pItem->width; ++x)
+                {
+                    const int index = GetArrangeIndex(targetX + x, targetY + y, columnCount);
+                    if (grid[index] != 0 && grid[index] != pItem->key)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            for (int y = 0; y < pItem->height; ++y)
+            {
+                for (int x = 0; x < pItem->width; ++x)
+                {
+                    grid[GetArrangeIndex(pItem->x + x, pItem->y + y, columnCount)] = 0;
+                }
+            }
+            pItem->x = targetX;
+            pItem->y = targetY;
+            for (int y = 0; y < pItem->height; ++y)
+            {
+                for (int x = 0; x < pItem->width; ++x)
+                {
+                    grid[GetArrangeIndex(pItem->x + x, pItem->y + y, columnCount)] = pItem->key;
+                }
+            }
+        }
+
+        for (const SimulatedItem& item : simulated)
+        {
+            if (item.x != item.targetX || item.y != item.targetY)
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -2201,6 +2375,11 @@ bool CNewUIMyInventory::BuildInventoryRearrangeMoves(std::vector<InventoryRearra
         return false;
     }
     if (plannedMoves.empty())
+    {
+        return false;
+    }
+
+    if (!SimulateArrangeMoveSequence(items, columnCount, rowCount, plannedMoves))
     {
         return false;
     }

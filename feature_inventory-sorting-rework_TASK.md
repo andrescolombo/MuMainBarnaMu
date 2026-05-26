@@ -88,10 +88,15 @@ the rework only touches client-side planning, validation, and rollback.
 - Wing-sized items (2x4 / 4x2) are supported via the existing 1..4 size guard.
 
 ## Final Status
-- Done in code on branch `feature/inventory-sorting-rework`. Not committed.
+- Iteration 1: deterministic first-fit + layout validator — pushed as
+  `08004e020` on branch `feature/inventory-sorting-rework`.
+- Iteration 2: end-to-end move-sequence simulator — pending push.
+- Iteration 3: phased placement — wide items row-major, tall (width=1,
+  height>1) items column-major so 1x3+ stack into the leftmost columns
+  instead of getting stranded on the right edge, 1x1 fillers last.
 - Touched files:
-  - `src/source/UI/NewUI/Inventory/NewUIMyInventory.cpp` (+88, -86)
-- Summary of changes:
+  - `src/source/UI/NewUI/Inventory/NewUIMyInventory.cpp`
+- Summary of changes (cumulative):
   - Removed `ArrangePlacementScore` and `IsBetterArrangePlacement`.
   - Replaced `FindBestArrangeTarget` with `FindFirstFitArrangeTarget` — a
     deterministic top-left first-fit scan.
@@ -99,12 +104,19 @@ the rework only touches client-side planning, validation, and rollback.
     key`) so identical-sized items have a stable ordering across runs.
   - Hoisted size bounds into `ARRANGE_MIN_ITEM_SIZE` / `ARRANGE_MAX_ITEM_SIZE`.
   - Added `ValidateArrangeLayout` (bounds + overlap + cell-count proof) and
-    `IsArrangeLayoutNoop`, both invoked by `BuildInventoryRearrangeMoves`
-    before any move is queued.
+    `IsArrangeLayoutNoop`.
+  - Added `SimulateArrangeMoveSequence`: replays the full planned move list
+    against a virtual occupancy grid seeded from the current inventory and
+    asserts (a) each move places the item in cells that are either free or
+    already owned by that item, (b) the final state matches every planned
+    target. This explicitly catches the case where small items must be
+    evicted before a tall 1xN can occupy its planned cells.
+  - All three checks (`ValidateArrangeLayout`, `IsArrangeLayoutNoop`,
+    `SimulateArrangeMoveSequence`) are wired into `BuildInventoryRearrangeMoves`
+    so a failure leaves the inventory untouched.
 - Behaviour:
-  - If validation fails, the build returns `false` and no network move is
+  - If any validator fails, the build returns `false` and no network move is
     sent, leaving the inventory untouched.
-  - If the inventory is already arranged, the build returns `false` (treated
-    as a no-op — the existing button click handler simply clears moves).
+  - If the inventory is already arranged, the build returns `false` (no-op).
 - Manual in-client validation (Test / Checklist) is up to Andres — no build,
   no test, no push performed per project policy.
