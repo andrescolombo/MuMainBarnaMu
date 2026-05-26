@@ -50,12 +50,13 @@ void CErrorReport::Destroy(void)
 
 void CErrorReport::CutHead(void)
 {
+    // Log file is ANSI: one byte per character, so byte count == char count throughout.
     DWORD dwNumber;
-    wchar_t lpszBuffer[128 * 1024];
-    ReadFile(m_hFile, lpszBuffer, 128 * 1024 - 1, &dwNumber, NULL);
+    char lpszBuffer[128 * 1024];
+    ReadFile(m_hFile, lpszBuffer, sizeof(lpszBuffer) - 1, &dwNumber, NULL);
     //m_iKey = Xor_ConvertBuffer( lpszBuffer, dwNumber);
     lpszBuffer[dwNumber] = '\0';
-    wchar_t* lpCut = CheckHeadToCut(lpszBuffer, dwNumber);
+    char* lpCut = CheckHeadToCut(lpszBuffer, dwNumber);
     if (dwNumber >= 32 * 1024 - 1)
     {
         lpCut = &lpszBuffer[32 * 1024 - 1];
@@ -65,26 +66,26 @@ void CErrorReport::CutHead(void)
         CloseHandle(m_hFile);
         DeleteFile(m_lpszFileName);
         m_hFile = CreateFile(m_lpszFileName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        DWORD dwSize = dwNumber - (lpCut - lpszBuffer);
+        DWORD dwSize = dwNumber - static_cast<DWORD>(lpCut - lpszBuffer);
         m_iKey = 0;
         WriteFile(m_hFile, lpCut, dwSize, &dwNumber, NULL);
     }
 }
 
-wchar_t* CErrorReport::CheckHeadToCut( wchar_t* lpszBuffer, DWORD dwNumber)
+char* CErrorReport::CheckHeadToCut(char* lpszBuffer, DWORD dwNumber)
 {
-    const wchar_t* lpszBegin = L"###### Log Begin ######";
-    int iLengthOfBegin = wcslen(lpszBegin);
+    const char* lpszBegin = "###### Log Begin ######";
+    int iLengthOfBegin = static_cast<int>(strlen(lpszBegin));
 
-    wchar_t* lpFoundList[128];
+    char* lpFoundList[128];
     int iFoundCount = 0;
 
-    for (wchar_t* lpFind = lpszBuffer; lpFind && *lpFind; )
+    for (char* lpFind = lpszBuffer; lpFind && *lpFind; )
     {
-        lpFind = wcschr(lpFind, (int)'#');
+        lpFind = strchr(lpFind, '#');
         if (lpFind)
         {
-            if (0 == wcsncmp(lpFind, lpszBegin, iLengthOfBegin))
+            if (0 == strncmp(lpFind, lpszBegin, iLengthOfBegin))
             {
                 lpFoundList[iFoundCount++] = lpFind;
                 lpFind += iLengthOfBegin;
@@ -113,15 +114,19 @@ void CErrorReport::WriteDebugInfoStr(wchar_t* lpszToWrite)
 {
     if (m_hFile != INVALID_HANDLE_VALUE)
     {
-        DWORD dwNumber;
-        // WriteFile expects a byte count, not a character count. wchar_t is 2 bytes on Windows,
-        // so multiply by sizeof(wchar_t) to write the full UTF-16 LE data correctly.
-        WriteFile(m_hFile, lpszToWrite, wcslen(lpszToWrite) * sizeof(wchar_t), &dwNumber, NULL);
-
-        if (dwNumber == 0)
+        // Convert UTF-16 wide string to ANSI before writing so the log file is plain text,
+        // readable in any editor without encoding configuration. All log messages are ASCII-safe.
+        char narrowBuf[2048];
+        int len = WideCharToMultiByte(CP_ACP, 0, lpszToWrite, -1, narrowBuf, sizeof(narrowBuf), nullptr, nullptr);
+        if (len > 1)  // len includes the null terminator; > 1 means there is actual content
         {
-            CloseHandle(m_hFile);
-            Create(m_lpszFileName);
+            DWORD dwNumber;
+            WriteFile(m_hFile, narrowBuf, len - 1, &dwNumber, NULL);
+            if (dwNumber == 0)
+            {
+                CloseHandle(m_hFile);
+                Create(m_lpszFileName);
+            }
         }
     }
 }
@@ -141,6 +146,7 @@ void CErrorReport::HexWrite(void* pBuffer, int iSize)
 {
     DWORD dwWritten = 0;
     wchar_t szLine[256] = { 0, };
+    char narrowLine[512];
     int offset = 0;
     offset += mu_swprintf(szLine, L"0x%00000008X : ", (DWORD*)pBuffer);
     for (int i = 0; i < iSize; i++) {
@@ -148,8 +154,8 @@ void CErrorReport::HexWrite(void* pBuffer, int iSize)
         if (i > 0 && i < iSize - 1) {
             if (i % 16 == 15) {	//. new line
                 offset += mu_swprintf(szLine + offset, L"\r\n");
-                // Byte count = char count * sizeof(wchar_t) for correct UTF-16 LE output.
-                WriteFile(m_hFile, szLine, wcslen(szLine) * sizeof(wchar_t), &dwWritten, NULL);
+                int len = WideCharToMultiByte(CP_ACP, 0, szLine, -1, narrowLine, sizeof(narrowLine), nullptr, nullptr);
+                if (len > 1) WriteFile(m_hFile, narrowLine, len - 1, &dwWritten, NULL);
                 offset = 0;
                 offset += mu_swprintf(szLine + offset, L"           : ");
             }
@@ -159,8 +165,8 @@ void CErrorReport::HexWrite(void* pBuffer, int iSize)
         }
     }
     offset += mu_swprintf(szLine + offset, L"\r\n");
-    // Byte count = char count * sizeof(wchar_t) for correct UTF-16 LE output.
-    WriteFile(m_hFile, szLine, wcslen(szLine) * sizeof(wchar_t), &dwWritten, NULL);
+    int len = WideCharToMultiByte(CP_ACP, 0, szLine, -1, narrowLine, sizeof(narrowLine), nullptr, nullptr);
+    if (len > 1) WriteFile(m_hFile, narrowLine, len - 1, &dwWritten, NULL);
 }
 
 void CErrorReport::AddSeparator(void)
