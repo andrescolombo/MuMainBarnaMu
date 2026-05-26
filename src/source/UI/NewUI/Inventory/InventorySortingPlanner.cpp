@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "UI/NewUI/Inventory/InventorySortingPlanner.h"
+#include "Core/Utilities/Log/muConsoleDebug.h"
 
 #include <algorithm>
 #include <array>
@@ -26,6 +27,14 @@ namespace
     constexpr int W_ADJACENCY = 3;
     constexpr int W_LARGEST_RECT = 4;
     constexpr int W_MOVES = 1;
+
+    // 1x1 grouping-score weights (separate component used by the
+    // "accept-on-1x1-cleanup" path; lower => better grouping).
+    constexpr int W_GROUP_SEPARATION = 1;       // Manhattan distance penalty per same-group pair
+    constexpr int W_GROUP_ADJACENCY_REWARD = 4; // bonus per orthogonal same-group pair
+
+    // Flip to false to silence planner diagnostics without removing call sites.
+    constexpr bool kPlannerDebugLogging = true;
 
     enum Phase
     {
@@ -475,6 +484,69 @@ namespace
         return mismatches / 2;
     }
 
+    // Independent score that reflects ONLY 1x1 grouping quality. Lower is better.
+    // Used to gate cosmetic "1x1 cleanup" plans that do not move large items and
+    // therefore barely shift the main total score.
+    int ComputeOneByOneGroupingScore(const Layout& layout, int columnCount, int rowCount)
+    {
+        struct Pos { int x; int y; int groupKey; };
+        std::vector<Pos> fillers;
+        fillers.reserve(layout.items.size());
+        for (const WorkItem& item : layout.items)
+        {
+            if (item.phase != PHASE_FILLER) continue;
+            fillers.push_back({ item.targetX, item.targetY, item.groupKey });
+        }
+        if (fillers.size() < 2) return 0;
+
+        int separation = 0;
+        int adjacencyMatches = 0;
+        for (size_t i = 0; i < fillers.size(); ++i)
+        {
+            for (size_t j = i + 1; j < fillers.size(); ++j)
+            {
+                if (fillers[i].groupKey != fillers[j].groupKey) continue;
+                const int dx = fillers[i].x - fillers[j].x;
+                const int dy = fillers[i].y - fillers[j].y;
+                const int manhattan = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
+                separation += manhattan;
+                if (manhattan == 1) ++adjacencyMatches;
+            }
+        }
+        (void)columnCount;
+        (void)rowCount;
+        return separation * W_GROUP_SEPARATION - adjacencyMatches * W_GROUP_ADJACENCY_REWARD;
+    }
+
+    int CountSameGroupAdjacencies(const Layout& layout, int columnCount, int rowCount)
+    {
+        std::vector<int> groupGrid(columnCount * rowCount, -1);
+        for (const WorkItem& item : layout.items)
+        {
+            if (item.phase != PHASE_FILLER) continue;
+            groupGrid[LinearIndex(item.targetX, item.targetY, columnCount)] = item.groupKey;
+        }
+        int matches = 0;
+        for (int y = 0; y < rowCount; ++y)
+        {
+            for (int x = 0; x < columnCount; ++x)
+            {
+                const int g = groupGrid[LinearIndex(x, y, columnCount)];
+                if (g < 0) continue;
+                if (x + 1 < columnCount && groupGrid[LinearIndex(x + 1, y, columnCount)] == g) ++matches;
+                if (y + 1 < rowCount && groupGrid[LinearIndex(x, y + 1, columnCount)] == g) ++matches;
+            }
+        }
+        return matches;
+    }
+
+    void PlannerLog(const wchar_t* fmt, int a = 0, int b = 0, int c = 0, int d = 0)
+    {
+        if (!kPlannerDebugLogging) return;
+        if (g_ConsoleDebug == nullptr) return;
+        g_ConsoleDebug->Write(MCD_NORMAL, fmt, a, b, c, d);
+    }
+
     int ComputeLargestEmptyRectangle(const Layout& layout, int columnCount, int rowCount)
     {
         std::vector<bool> occupied(columnCount * rowCount, false);
@@ -771,14 +843,20 @@ PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int r
     Layout current = BuildCurrentLayout(items);
     if (!ValidateLayout(current, columnCount, rowCount)) return result;
     const int currentScore = ScoreLayout(current, columnCount, rowCount, /*moves*/ 0);
+    const int currentGroupScore = ComputeOneByOneGroupingScore(current, columnCount, rowCount);
+    const int currentAdjMatches = CountSameGroupAdjacencies(current, columnCount, rowCount);
+    PlannerLog(L"[ArrangeSort] current score=%d group=%d adj=%d", currentScore, currentGroupScore, currentAdjMatches);
 
     Layout pass1 = current;
-    if (!BuildPass1Layout(pass1, columnCount, rowCount)) return result;
-    if (!ValidateLayout(pass1, columnCount, rowCount)) return result;
+    if (!BuildPass1Layout(pass1, columnCount, rowCount)) { PlannerLog(L"[ArrangeSort] pass1 build failed"); return result; }
+    if (!ValidateLayout(pass1, columnCount, rowCount)) { PlannerLog(L"[ArrangeSort] pass1 validate failed"); return result; }
     int pass1Score = ScoreLayout(pass1, columnCount, rowCount, CountMovesNeeded(pass1));
+    int pass1Group = ComputeOneByOneGroupingScore(pass1, columnCount, rowCount);
+    PlannerLog(L"[ArrangeSort] pass1 score=%d group=%d moves=%d", pass1Score, pass1Group, CountMovesNeeded(pass1));
 
     Layout best = pass1;
     int bestScore = pass1Score;
+    int bestGroup = pass1Group;
     int adoptedPasses = 1;
 
     Layout pass2;
@@ -786,12 +864,21 @@ PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int r
         && ValidateLayout(pass2, columnCount, rowCount))
     {
         const int score = ScoreLayout(pass2, columnCount, rowCount, CountMovesNeeded(pass2));
-        if (score < bestScore - settings.passProgressionThreshold)
+        const int group = ComputeOneByOneGroupingScore(pass2, columnCount, rowCount);
+        const bool improvesTotal = score < bestScore - settings.passProgressionThreshold;
+        const bool improvesGroupNoRegression = group < bestGroup && score <= bestScore;
+        PlannerLog(L"[ArrangeSort] pass2 score=%d group=%d totalOk=%d groupOk=%d", score, group, improvesTotal ? 1 : 0, improvesGroupNoRegression ? 1 : 0);
+        if (improvesTotal || improvesGroupNoRegression)
         {
             best = pass2;
             bestScore = score;
+            bestGroup = group;
             ++adoptedPasses;
         }
+    }
+    else
+    {
+        PlannerLog(L"[ArrangeSort] pass2 unavailable");
     }
 
     Layout pass3;
@@ -799,26 +886,64 @@ PlannerResult Plan(const std::vector<PlannerItem>& items, int columnCount, int r
         && ValidateLayout(pass3, columnCount, rowCount))
     {
         const int score = ScoreLayout(pass3, columnCount, rowCount, CountMovesNeeded(pass3));
-        if (score < bestScore - settings.passProgressionThreshold)
+        const int group = ComputeOneByOneGroupingScore(pass3, columnCount, rowCount);
+        // Pass 3 only reassigns which 1x1 lands in each cell. The total score
+        // barely moves; accept it as long as the grouping improves and no
+        // regression in the main score.
+        const bool improvesTotal = score < bestScore - settings.passProgressionThreshold;
+        const bool improvesGroupNoRegression = group < bestGroup && score <= bestScore;
+        PlannerLog(L"[ArrangeSort] pass3 score=%d group=%d totalOk=%d groupOk=%d", score, group, improvesTotal ? 1 : 0, improvesGroupNoRegression ? 1 : 0);
+        if (improvesTotal || improvesGroupNoRegression)
         {
             best = pass3;
             bestScore = score;
+            bestGroup = group;
             ++adoptedPasses;
         }
     }
+    else
+    {
+        PlannerLog(L"[ArrangeSort] pass3 unavailable");
+    }
 
-    if (bestScore >= currentScore - settings.acceptanceThreshold) return result;
+    // Acceptance: take the plan if it wins the total-score margin OR if 1x1
+    // grouping/cleanup improves enough on its own (without structural regression).
+    // The grouping path scores the layout with moves=0 so a long but pure-cleanup
+    // sequence is not penalised away by the move-count term.
+    const int bestStructuralScore = ScoreLayout(best, columnCount, rowCount, /*moves*/ 0);
+    const bool acceptByTotal = bestScore < currentScore - settings.acceptanceThreshold;
+    const bool acceptByGrouping = bestGroup < currentGroupScore - settings.oneByOneCleanupThreshold
+        && bestStructuralScore <= currentScore;
+    PlannerLog(L"[ArrangeSort] accept: byTotal=%d byGroup=%d struct=%d", acceptByTotal ? 1 : 0, acceptByGrouping ? 1 : 0, bestStructuralScore);
+    if (!acceptByTotal && !acceptByGrouping)
+    {
+        PlannerLog(L"[ArrangeSort] no plan adopted");
+        return result;
+    }
 
     std::vector<PlannerMove> moves;
     if (!TryPlan(best, columnCount, rowCount, settings, moves))
     {
-        // A later pass produced an unrealizable sequence; fall back to pass 1
-        // (which is always realizable for any layout the validator accepted).
+        PlannerLog(L"[ArrangeSort] best plan unrealizable; falling back to pass1");
         if (adoptedPasses == 1 || !TryPlan(pass1, columnCount, rowCount, settings, moves))
         {
+            PlannerLog(L"[ArrangeSort] fallback also unrealizable");
             return result;
         }
     }
+
+    // Diagnostic move breakdown so failures in the field are debuggable.
+    int oneByOneMoves = 0;
+    for (const PlannerMove& m : moves)
+    {
+        for (const WorkItem& w : best.items)
+        {
+            if (w.key != m.itemKey) continue;
+            if (w.width == 1 && w.height == 1) ++oneByOneMoves;
+            break;
+        }
+    }
+    PlannerLog(L"[ArrangeSort] emitting moves=%d (1x1=%d)", static_cast<int>(moves.size()), oneByOneMoves);
 
     result.hasPlan = true;
     result.moves = std::move(moves);

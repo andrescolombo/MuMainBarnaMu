@@ -49,6 +49,7 @@ namespace
 
     constexpr int ARRANGE_ACCEPTANCE_THRESHOLD = 5;
     constexpr int ARRANGE_PASS_THRESHOLD = 1;
+    constexpr int ARRANGE_ONEBYONE_CLEANUP_THRESHOLD = 1;
 
     bool IsInventoryRearrangeInterfaceBlocked()
     {
@@ -1762,11 +1763,12 @@ bool CNewUIMyInventory::BuildInventoryRearrangeMoves(std::vector<InventoryRearra
         entry.sourceY = pItem->y;
         entry.width = pItemAttr->Width;
         entry.height = pItemAttr->Height;
-        // Deterministic grouping key for 1x1 adjacency: type + level + option type/level.
+        // Deterministic grouping key. Compose Type (upper 16 bits) and Level
+        // (lower 16 bits) without XOR so distinct (Type, Level) pairs never
+        // collide. Option type/level are intentionally omitted so stackable
+        // consumables and same-tier items group together.
         entry.groupKey = (static_cast<int>(pItem->Type) << 16)
-            ^ (pItem->Level & 0xFF) << 8
-            ^ (pItem->OptionType & 0xF) << 4
-            ^ (pItem->OptionLevel & 0xF);
+            | (pItem->Level & 0xFFFF);
         items.push_back(entry);
     }
 
@@ -1774,6 +1776,7 @@ bool CNewUIMyInventory::BuildInventoryRearrangeMoves(std::vector<InventoryRearra
     settings.equipmentOffset = MAX_EQUIPMENT;
     settings.acceptanceThreshold = ARRANGE_ACCEPTANCE_THRESHOLD;
     settings.passProgressionThreshold = ARRANGE_PASS_THRESHOLD;
+    settings.oneByOneCleanupThreshold = ARRANGE_ONEBYONE_CLEANUP_THRESHOLD;
 
     UI::Inventory::Sorting::PlannerResult result =
         UI::Inventory::Sorting::Plan(items, columnCount, rowCount, settings);

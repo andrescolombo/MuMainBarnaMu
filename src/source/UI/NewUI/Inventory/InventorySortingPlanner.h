@@ -35,8 +35,10 @@ struct PlannerMove
 struct PlannerSettings
 {
     int equipmentOffset;            // MAX_EQUIPMENT (added to linear inventory index)
-    int acceptanceThreshold;        // minimum score gain to apply a plan
+    int acceptanceThreshold;        // minimum total-score gain to apply a plan
     int passProgressionThreshold;   // minimum score gain to adopt a later pass
+    int oneByOneCleanupThreshold;   // minimum 1x1 grouping-score gain accepted
+                                    // even when the total score is unchanged
 };
 
 struct PlannerResult
