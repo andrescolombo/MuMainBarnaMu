@@ -46,6 +46,9 @@ namespace
     constexpr int ARRANGE_BUTTON_WIDTH = 36;
     constexpr int ARRANGE_BUTTON_HEIGHT = 29;
 
+    constexpr int ARRANGE_MIN_ITEM_SIZE = 1;
+    constexpr int ARRANGE_MAX_ITEM_SIZE = 4;
+
     struct ArrangeItem
     {
         DWORD key;
@@ -56,17 +59,6 @@ namespace
         int targetY;
         int width;
         int height;
-    };
-
-    struct ArrangePlacementScore
-    {
-        int area;
-        int bottom;
-        int right;
-        int row;
-        int column;
-        int columnLane;
-        int oddColumn;
     };
 
     bool IsInventoryRearrangeInterfaceBlocked()
@@ -104,7 +96,8 @@ namespace
 
     bool IsAllowedArrangeItemSize(int width, int height)
     {
-        return width >= 1 && width <= 4 && height >= 1 && height <= 4;
+        return width >= ARRANGE_MIN_ITEM_SIZE && width <= ARRANGE_MAX_ITEM_SIZE
+            && height >= ARRANGE_MIN_ITEM_SIZE && height <= ARRANGE_MAX_ITEM_SIZE;
     }
 
     void OccupyArrangeCells(std::vector<DWORD>& occupied, int columnCount, const ArrangeItem& item, DWORD value)
@@ -161,90 +154,26 @@ namespace
         return true;
     }
 
-    bool IsBetterArrangePlacement(const ArrangeItem& item, const ArrangePlacementScore& candidate, const ArrangePlacementScore& best)
+    bool FindFirstFitArrangeTarget(const std::vector<bool>& occupied, int columnCount, int rowCount, ArrangeItem& item)
     {
-        if (item.width > 1)
+        const int maxRow = rowCount - item.height;
+        const int maxColumn = columnCount - item.width;
+        for (int row = 0; row <= maxRow; ++row)
         {
-            if (candidate.oddColumn != best.oddColumn)
-            {
-                return candidate.oddColumn < best.oddColumn;
-            }
-            if (candidate.columnLane != best.columnLane)
-            {
-                return candidate.columnLane < best.columnLane;
-            }
-            if (candidate.row != best.row)
-            {
-                return candidate.row < best.row;
-            }
-        }
-
-        if (candidate.bottom != best.bottom)
-        {
-            return candidate.bottom < best.bottom;
-        }
-        if (candidate.area != best.area)
-        {
-            return candidate.area < best.area;
-        }
-        if (candidate.right != best.right)
-        {
-            return candidate.right < best.right;
-        }
-        if (candidate.row != best.row)
-        {
-            return candidate.row < best.row;
-        }
-
-        return candidate.column < best.column;
-    }
-
-    bool FindBestArrangeTarget(const std::vector<bool>& occupied, int columnCount, int rowCount, ArrangeItem& item)
-    {
-        bool found = false;
-        ArrangePlacementScore bestScore{};
-        int bestColumn = 0;
-        int bestRow = 0;
-
-        for (int row = 0; row < rowCount; ++row)
-        {
-            for (int column = 0; column < columnCount; ++column)
+            for (int column = 0; column <= maxColumn; ++column)
             {
                 if (!CanPlaceArrangeTarget(occupied, columnCount, rowCount, item, column, row))
                 {
                     continue;
                 }
 
-                const int bottom = row + item.height;
-                const int right = column + item.width;
-                const ArrangePlacementScore candidateScore = {
-                    bottom * right,
-                    bottom,
-                    right,
-                    row,
-                    column,
-                    column / item.width,
-                    column % item.width
-                };
-
-                if (!found || IsBetterArrangePlacement(item, candidateScore, bestScore))
-                {
-                    found = true;
-                    bestScore = candidateScore;
-                    bestColumn = column;
-                    bestRow = row;
-                }
+                item.targetX = column;
+                item.targetY = row;
+                return true;
             }
         }
 
-        if (!found)
-        {
-            return false;
-        }
-
-        item.targetX = bestColumn;
-        item.targetY = bestRow;
-        return true;
+        return false;
     }
 
     void OccupyArrangeTargetCells(std::vector<bool>& occupied, int columnCount, const ArrangeItem& item)
@@ -369,6 +298,10 @@ namespace
             {
                 return left.width > right.width;
             }
+            if (left.sourceIndex != right.sourceIndex)
+            {
+                return left.sourceIndex < right.sourceIndex;
+            }
             return left.key < right.key;
         });
 
@@ -376,7 +309,7 @@ namespace
 
         for (ArrangeItem& item : items)
         {
-            if (!FindBestArrangeTarget(occupied, columnCount, rowCount, item))
+            if (!FindFirstFitArrangeTarget(occupied, columnCount, rowCount, item))
             {
                 return false;
             }
@@ -384,6 +317,65 @@ namespace
             OccupyArrangeTargetCells(occupied, columnCount, item);
         }
 
+        return true;
+    }
+
+    bool ValidateArrangeLayout(const std::vector<ArrangeItem>& items, int columnCount, int rowCount)
+    {
+        if (columnCount <= 0 || rowCount <= 0)
+        {
+            return false;
+        }
+
+        const int totalCells = columnCount * rowCount;
+        std::vector<bool> occupied(totalCells, false);
+        int occupiedCount = 0;
+        int expectedCount = 0;
+
+        for (const ArrangeItem& item : items)
+        {
+            if (!IsAllowedArrangeItemSize(item.width, item.height))
+            {
+                return false;
+            }
+            if (item.targetX < 0 || item.targetY < 0)
+            {
+                return false;
+            }
+            if (item.targetX + item.width > columnCount || item.targetY + item.height > rowCount)
+            {
+                return false;
+            }
+
+            expectedCount += item.width * item.height;
+
+            for (int y = 0; y < item.height; ++y)
+            {
+                for (int x = 0; x < item.width; ++x)
+                {
+                    const int index = GetArrangeIndex(item.targetX + x, item.targetY + y, columnCount);
+                    if (occupied[index])
+                    {
+                        return false;
+                    }
+                    occupied[index] = true;
+                    ++occupiedCount;
+                }
+            }
+        }
+
+        return occupiedCount == expectedCount;
+    }
+
+    bool IsArrangeLayoutNoop(const std::vector<ArrangeItem>& items)
+    {
+        for (const ArrangeItem& item : items)
+        {
+            if (!IsArrangeItemAtTarget(item))
+            {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -2189,6 +2181,16 @@ bool CNewUIMyInventory::BuildInventoryRearrangeMoves(std::vector<InventoryRearra
     }
 
     if (!ComputeArrangeTargets(items, columnCount, rowCount))
+    {
+        return false;
+    }
+
+    if (!ValidateArrangeLayout(items, columnCount, rowCount))
+    {
+        return false;
+    }
+
+    if (IsArrangeLayoutNoop(items))
     {
         return false;
     }
