@@ -11,6 +11,7 @@
 #include "UI/NewUI/NewUISystem.h"
 #include "Core/Utilities/Log/muConsoleDebug.h"
 #include "Character/CharacterManager.h"
+#include "GameLogic/Helper/SessionStats.h"
 #include "GameLogic/Skills/SkillManager.h"
 #include "GameLogic/Social/PartyManager.h"
 #include "World/MapInfra/MapManager.h"
@@ -181,12 +182,15 @@ namespace MUHelper
         m_iLoopCounter = MUHELPER_FULL_WORK_TICKS - 1;
 
         m_bActive = true;
+        GameLogic::Helper::SessionStats::Start();
+        g_pNewUISystem->Show(SEASON3B::INTERFACE_HELPER_SESSION_STATUS);
         g_ConsoleDebug->Write(MCD_NORMAL, L"[MU Helper] Started");
     }
 
     void CMuHelper::Stop()
     {
         m_bActive = false;
+        GameLogic::Helper::SessionStats::Stop();
         g_ConsoleDebug->Write(MCD_NORMAL, L"[MU Helper] Stopped");
     }
 
@@ -203,6 +207,12 @@ namespace MUHelper
             TriggerStop();
             return;
         }
+
+        GameLogic::Helper::SessionStats::Tick(
+            MUHELPER_TIMER_INTERVAL_MS,
+            Hero->PositionX,
+            Hero->PositionY,
+            HasAnyTarget());
 
         m_iElapsedMilliseconds += MUHELPER_TIMER_INTERVAL_MS;
         while (m_iElapsedMilliseconds >= 1000)
@@ -356,6 +366,11 @@ namespace MUHelper
         int ms = 1000 - (as * 2);
         if (ms < 100) ms = 100;
         return ms;
+    }
+
+    bool CMuHelper::HasAnyTarget() const
+    {
+        return m_iCurrentTarget != -1 || !m_setTargets.empty();
     }
 
     float CMuHelper::GetAttackRange(ActionSkillType iSkill)
@@ -756,6 +771,11 @@ namespace MUHelper
                 if (iPotionIndex != -1)
                 {
                     SendRequestUse(iPotionIndex, 0);
+                    GameLogic::Helper::SessionStats::RecordPotionUsed(GameLogic::Helper::SessionStats::PotionKind::HP);
+                }
+                else
+                {
+                    GameLogic::Helper::SessionStats::RecordWarning(GameLogic::Helper::SessionStats::Warning::NoPotions);
                 }
             }
         }
@@ -897,6 +917,7 @@ namespace MUHelper
 
                 if (iHealth <= DEFAULT_DURABILITY_THRESHOLD)
                 {
+                    GameLogic::Helper::SessionStats::RecordWarning(GameLogic::Helper::SessionStats::Warning::LowDurability);
                     int64_t iGoldCost = CalcSelfRepairCost(ItemValue(pItem, 2), iDurability, iMaxDurability, pItem->Type);
                     if (iGoldCost <= CharacterMachine->Gold)
                     {
@@ -1150,6 +1171,7 @@ namespace MUHelper
         // Call Action() directly — basic attack doesn't go through ExecuteSkill,
         // and the engine's input loop only forwards Attacking=1 when IsAutoAttack() is on.
         Action(Hero, &Hero->Object, true);
+        GameLogic::Helper::SessionStats::RecordActivity();
         m_dwLastBasicHitTick = nowTick;
 
         SelectedCharacter = iPreviousSelectedCharacter;
@@ -1324,6 +1346,10 @@ namespace MUHelper
         {
             DeleteTarget(iTarget);
         }
+        if (iSkillResult == 1)
+        {
+            GameLogic::Helper::SessionStats::RecordActivity();
+        }
 
         return (int)(iSkillResult == 1);
     }
@@ -1397,6 +1423,7 @@ namespace MUHelper
             Hero->Path.Lock.unlock();
 
             SendMove(Hero, &Hero->Object);
+            GameLogic::Helper::SessionStats::RecordMovementAttempt(Hero->PositionX, Hero->PositionY);
             return 0;
         }
 
@@ -1414,6 +1441,7 @@ namespace MUHelper
         ActionTarget = iCharIndex;
         Attacking = 1;
         Action(Hero, &Hero->Object, true);
+        GameLogic::Helper::SessionStats::RecordActivity();
         m_dwLastBasicHitTick = nowTick;
         return 1;
     }
@@ -1446,6 +1474,7 @@ namespace MUHelper
             if (PathFinding2((Hero->PositionX), (Hero->PositionY), TargetX, TargetY, &Hero->Path))
             {
                 SendMove(Hero, &Hero->Object);
+                GameLogic::Helper::SessionStats::RecordMovementAttempt(Hero->PositionX, Hero->PositionY);
             }
             return 0;
         }
@@ -1578,6 +1607,7 @@ namespace MUHelper
                         {
                             SendGetItem = m_iCurrentItem;
                             SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
+                            GameLogic::Helper::SessionStats::RecordActivity();
                             DeleteItem(m_iCurrentItem);
                         }
                         return 1;
@@ -1596,6 +1626,7 @@ namespace MUHelper
                 if (bHasPath)
                 {
                     SendMove(Hero, &Hero->Object);
+                    GameLogic::Helper::SessionStats::RecordMovementAttempt(Hero->PositionX, Hero->PositionY);
                 }
 
                 ++m_iObtainStuckTicks;
@@ -1620,6 +1651,7 @@ namespace MUHelper
                 {
                     SendGetItem = m_iCurrentItem;
                     SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
+                    GameLogic::Helper::SessionStats::RecordActivity();
                     DeleteItem(m_iCurrentItem);
                 }
             }

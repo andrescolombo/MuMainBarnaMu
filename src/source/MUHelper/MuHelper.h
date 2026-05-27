@@ -84,6 +84,7 @@ namespace MUHelper
 		int SimulateBasicAttack();
 		bool IsMonsterOnTile(int iTileX, int iTileY);
 		int GetBasicAttackIntervalMs() const;
+		bool HasAnyTarget() const;
 
 	private:
 		ConfigData m_config;

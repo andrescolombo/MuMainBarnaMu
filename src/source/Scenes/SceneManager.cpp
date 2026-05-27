@@ -33,6 +33,7 @@ FrameTimingState g_frameTiming;
 #include "UI/Legacy/UIMng.h"
 #include "Network/Server/WSclient.h"
 #include "GameLogic/Events/w_CursedTemple.h"
+#include "GameLogic/Helper/SessionStats.h"
 #include "Network/Server/ServerListManager.h"
 #include "UI/NewUI/NewUISystem.h"
 #include "Engine/Object/ZzzInterface.h"
@@ -616,6 +617,7 @@ static void CheckServerConnection()
             g_ErrorReport.Write(L"> Connection closed. ");
             g_ErrorReport.WriteCurrentTime();
             g_ConsoleDebug->Write(MCD_NORMAL, L"Connection closed");
+            GameLogic::Helper::SessionStats::RecordDisconnected();
             CUIMng::Instance().PopUpMsgWin(MESSAGE_SERVER_LOST);
         }
     }
