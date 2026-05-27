@@ -214,6 +214,10 @@ namespace MUHelper
             Hero->PositionY,
             HasAnyTarget());
 
+        GameLogic::Helper::SessionStats::SampleExperience(
+            static_cast<long long>(CharacterAttribute->Experience),
+            Master_Level_Data.lMasterLevel_Experince);
+
         m_iElapsedMilliseconds += MUHELPER_TIMER_INTERVAL_MS;
         while (m_iElapsedMilliseconds >= 1000)
         {
