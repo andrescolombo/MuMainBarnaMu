@@ -38,7 +38,7 @@
   "helper_session_status.no_potions": "No potions",
   "helper_session_status.inventory_full": "Inventory full",
   "helper_session_status.disconnected": "Disconnected",
-  "helper_session_status.killed_by_monster": "Killed by monster",
-  "helper_session_status.killed_by_pk": "Killed by PK",
+  "helper_session_status.killed_by_monster": "Monster",
+  "helper_session_status.killed_by_pk": "Player",
   "helper_session_status.pieces": "pieces"
 }

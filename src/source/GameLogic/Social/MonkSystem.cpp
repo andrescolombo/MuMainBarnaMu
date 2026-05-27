@@ -12,6 +12,7 @@
 #include "Character/CharacterManager.h"
 #include "Audio/DSPlaySound.h"
 #include "GameLogic/Skills/SkillManager.h"
+#include "GameLogic/Helper/SessionStats.h"
 #include "World/MapInfra/MapManager.h"
 #include "Network/Server/WSclient.h"
 #include "Engine/Object/ZzzInterface.h"
@@ -553,6 +554,7 @@ void CMonkSystem::SetDarksideTargetIndex(WORD* _pTargetIndex, ActionSkillType sk
             m_fDistanceNextFrame = 0;
             m_bDarkSideEffOnce = false;
             m_bDarkSideEffOnce2 = false;
+            GameLogic::Helper::SessionStats::RegisterHeroTarget(_pTargetIndex[i]);
         }
     }
 
