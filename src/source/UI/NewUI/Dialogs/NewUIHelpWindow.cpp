@@ -17,6 +17,7 @@ namespace
     constexpr int HELP_KEY_F9_TOGGLE_CAMERA   = 10000;
     constexpr int HELP_KEY_F10_TOGGLE_ZOOM    = 10001;
     constexpr int HELP_KEY_F11_RESET_VIEW     = 10002;
+    constexpr int HELP_KEY_SHIFT_F8_TOGGLE_HELPER_PANEL = 10003;
 }
 
 void SEASON3B::RegisterCustomHelpText()
@@ -24,6 +25,7 @@ void SEASON3B::RegisterCustomHelpText()
     GlobalText.Add(HELP_KEY_F9_TOGGLE_CAMERA, L"F9 - Toggle 3D Camera");
     GlobalText.Add(HELP_KEY_F10_TOGGLE_ZOOM,  L"F10 - Lock / Unlock Camera Zoom");
     GlobalText.Add(HELP_KEY_F11_RESET_VIEW,   L"F11 - Reset Camera View");
+    GlobalText.Add(HELP_KEY_SHIFT_F8_TOGGLE_HELPER_PANEL, L"Shift+F8 - Toggle Mu Helper Session Panel");
 }
 
 SEASON3B::CNewUIHelpWindow::CNewUIHelpWindow()
@@ -153,6 +155,7 @@ bool SEASON3B::CNewUIHelpWindow::Render()
             HELP_KEY_F9_TOGGLE_CAMERA,
             HELP_KEY_F10_TOGGLE_ZOOM,
             HELP_KEY_F11_RESET_VIEW,
+            HELP_KEY_SHIFT_F8_TOGGLE_HELPER_PANEL,
         };
         for (int key : kCustomKeys)
         {

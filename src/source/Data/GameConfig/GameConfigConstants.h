@@ -46,6 +46,8 @@ namespace CfgKeys
     inline constexpr wchar_t CfgKeyFriendRequestMode[] = L"FriendRequestMode";
     inline constexpr wchar_t CfgKeyGuildRequestMode[] = L"GuildRequestMode";
     inline constexpr wchar_t CfgKeyPartyRequestMode[] = L"PartyRequestMode";
+    inline constexpr wchar_t CfgKeyHelperSessionPanelX[] = L"SessionPanelX";
+    inline constexpr wchar_t CfgKeyHelperSessionPanelY[] = L"SessionPanelY";
 }
 
 namespace CfgDefaults
@@ -74,4 +76,7 @@ namespace CfgDefaults
 
     inline constexpr int CfgDefaultZoom = 1735;  // OrbitalCamera DEFAULT_RADIUS — matches Default-cam camera-to-Hero distance
     inline constexpr int CfgDefaultRequestMode = 0;
+
+    // -1 sentinel: "no saved position yet" -> Panel falls back to its computed bottom-right anchor.
+    inline constexpr int CfgDefaultHelperSessionPanelCoord = -1;
 }
