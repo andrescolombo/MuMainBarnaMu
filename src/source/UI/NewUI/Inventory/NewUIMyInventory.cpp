@@ -24,6 +24,7 @@ extern bool SelectFlag;
 #include "GameLogic/Items/CSItemOption.h"
 #include "World/MapInfra/MapManager.h"
 #include "Network/Server/SocketSystem.h"
+#include "MUHelper/MuHelper.h"
 #include "World/MapInfra/PortalMgr.h"
 #ifdef CSK_FIX_BLUELUCKYBAG_MOVECOMMAND
 #include "GameLogic/Events/Event.h"
@@ -1012,12 +1013,14 @@ bool CNewUIMyInventory::UpdateMouseEvent()
             {
                 if (Hero->Dead == 0)
                 {
+                    MUHelper::g_MuHelper.NoteOwnDrop(tx, ty);
                     SocketClient->ToGameServer()->SendDropItemRequest(tx, ty, iSourceIndex);
                     SendDropItem = iSourceIndex;
                 }
             }
             else if (pItemObj && pItemObj->ex_src_type == ITEM_EX_SRC_EQUIPMENT)
             {
+                MUHelper::g_MuHelper.NoteOwnDrop(tx, ty);
                 SocketClient->ToGameServer()->SendDropItemRequest(tx, ty, iSourceIndex);
                 SendDropItem = iSourceIndex;
             }
@@ -1417,6 +1420,13 @@ int CNewUIMyInventory::FindEmptySlotIncludingExtensions(ITEM* pItem) const
 
     const ITEM_ATTRIBUTE* pItemAttr = &ItemAttribute[pItem->Type];
     return FindEmptySlotIncludingExtensions(pItemAttr->Width, pItemAttr->Height);
+}
+
+bool CNewUIMyInventory::CanFitItem(const ITEM* pItem) const
+{
+    if (pItem == nullptr || m_pNewInventoryCtrl == nullptr) return false;
+    const ITEM_ATTRIBUTE* pAttr = &ItemAttribute[pItem->Type];
+    return m_pNewInventoryCtrl->CanFit(pAttr->Width, pAttr->Height);
 }
 
 void CNewUIMyInventory::UI2DEffectCallback(LPVOID pClass, DWORD dwParamA, DWORD dwParamB)

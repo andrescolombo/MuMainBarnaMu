@@ -165,7 +165,9 @@ namespace SEASON3B
 
         bool CheckSlot(int startIndex, int width, int height);
         bool CheckSlot(int iColumnX, int iRowY, int width, int height);
+        bool IsRectEmpty(int startIndex, int width, int height) const;
     public:
+        bool CanFit(int width, int height) const;
         CNewUIInventoryCtrl();
         virtual ~CNewUIInventoryCtrl();
 

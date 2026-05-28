@@ -24,6 +24,8 @@ constexpr int DEFAULT_DURABILITY_THRESHOLD = 50;
 constexpr float BASIC_ATTACK_DISTANCE = 1.5f;
 constexpr int MUHELPER_FULL_WORK_INTERVAL_MS = 250;
 constexpr int MUHELPER_FULL_WORK_TICKS = MUHELPER_FULL_WORK_INTERVAL_MS / MUHelper::MUHELPER_TIMER_INTERVAL_MS;
+constexpr DWORD OWN_DROP_TTL_MS = 5000;
+constexpr int OWN_DROP_TILE_TOLERANCE = 1;
 
 SpinLock _targetsLock;
 SpinLock _itemsLock;
@@ -1688,6 +1690,14 @@ namespace MUHelper
         ITEM_t* pDrop = &Items[iItemId];
         ITEM* pItem = &pDrop->Item;
 
+        if (!MatchesPickupFilters(pItem)) return false;
+        if (IsMoneyItem(pItem)) return true;            // zen credits directly, no slot
+        if (g_pMyInventory == nullptr) return true;     // UI not ready, let server decide
+        return g_pMyInventory->CanFitItem(pItem);
+    }
+
+    bool CMuHelper::MatchesPickupFilters(ITEM* pItem)
+    {
         if ((m_config.bPickZen && IsMoneyItem(pItem))
             || (m_config.bPickJewel && IsJewelItem(pItem))
             || (m_config.bPickAncient && IsAncientItem(pItem))
@@ -1716,14 +1726,81 @@ namespace MUHelper
     void CMuHelper::AddItem(int iItemId, POINT posWhere)
     {
         _itemsLock.lock();
+        if (m_setOwnDropItems.count(iItemId) > 0)
+        {
+            _itemsLock.unlock();
+            return;
+        }
+        if (ClaimOwnDropAt(posWhere.x, posWhere.y))
+        {
+            m_setOwnDropItems.insert(iItemId);
+            _itemsLock.unlock();
+            return;
+        }
         m_setItems.insert(iItemId);
         _itemsLock.unlock();
+    }
+
+    // Own-drop tracking: if the player just threw something away, the bot
+    // should leave it on the floor. Drop sites call NoteOwnDrop(tx, ty) right
+    // before SendDropItemRequest. When the server echoes the drop back via
+    // ReceiveCreateItemViewportExtended / ReceiveCreateMoney, AddItem matches
+    // the incoming floor item against the recorded tiles (within
+    // OWN_DROP_TILE_TOLERANCE to absorb server-side placement shifts and within
+    // OWN_DROP_TTL_MS to bound staleness) and parks the id in
+    // m_setOwnDropItems instead of m_setItems -- the bot never sees it.
+    // Important: we deliberately do NOT route through m_setSkippedItems,
+    // because DeleteTarget clears that set on every mob death and would
+    // un-skip our drop within seconds of any kill.
+    void CMuHelper::NoteOwnDrop(int tx, int ty)
+    {
+        const DWORD nowTick = GetTickCount();
+        _itemsLock.lock();
+
+        int oldestSlot = 0;
+        DWORD oldestTick = nowTick;
+        for (int i = 0; i < kMaxOwnDrops; i++)
+        {
+            const bool bExpired = (nowTick - m_aOwnDrops[i].tickRecorded) > OWN_DROP_TTL_MS;
+            if (m_aOwnDrops[i].x < 0 || bExpired)
+            {
+                m_aOwnDrops[i] = { tx, ty, nowTick };
+                _itemsLock.unlock();
+                return;
+            }
+            if (m_aOwnDrops[i].tickRecorded < oldestTick)
+            {
+                oldestTick = m_aOwnDrops[i].tickRecorded;
+                oldestSlot = i;
+            }
+        }
+
+        m_aOwnDrops[oldestSlot] = { tx, ty, nowTick };
+        _itemsLock.unlock();
+    }
+
+    bool CMuHelper::ClaimOwnDropAt(int tx, int ty)
+    {
+        const DWORD nowTick = GetTickCount();
+        for (int i = 0; i < kMaxOwnDrops; i++)
+        {
+            if (m_aOwnDrops[i].x < 0) continue;
+            const int dx = m_aOwnDrops[i].x - tx;
+            const int dy = m_aOwnDrops[i].y - ty;
+            if (dx < -OWN_DROP_TILE_TOLERANCE || dx > OWN_DROP_TILE_TOLERANCE) continue;
+            if (dy < -OWN_DROP_TILE_TOLERANCE || dy > OWN_DROP_TILE_TOLERANCE) continue;
+            if ((nowTick - m_aOwnDrops[i].tickRecorded) > OWN_DROP_TTL_MS) continue;
+            m_aOwnDrops[i] = {};
+            return true;
+        }
+        return false;
     }
 
     void CMuHelper::DeleteItem(int iItemId)
     {
         _itemsLock.lock();
         m_setItems.erase(iItemId);
+        m_setOwnDropItems.erase(iItemId);
         _itemsLock.unlock();
 
         m_setSkippedItems.erase(iItemId);

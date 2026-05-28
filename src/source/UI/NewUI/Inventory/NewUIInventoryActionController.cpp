@@ -12,6 +12,7 @@
 #include "GameLogic/Items/CSItemOption.h"
 #include "World/MapInfra/MapManager.h"
 #include "Network/Server/SocketSystem.h"
+#include "MUHelper/MuHelper.h"
 #include "GameLogic/Social/MonkSystem.h"
 #include "Character/CharacterManager.h"
 #include "Audio/DSPlaySound.h"
@@ -431,6 +432,7 @@ bool CNewUIInventoryActionController::TryDropItem(CNewUIInventoryCtrl* targetCon
     const int ty = Hero->PositionY;
     const int sourceIndex = pPickedItem->GetSourceLinealPos();
 
+    MUHelper::g_MuHelper.NoteOwnDrop(tx, ty);
     SocketClient->ToGameServer()->SendDropItemRequest(tx, ty, sourceIndex);
     SendDropItem = sourceIndex;
 
