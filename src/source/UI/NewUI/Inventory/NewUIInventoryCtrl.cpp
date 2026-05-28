@@ -1525,6 +1525,35 @@ bool SEASON3B::CNewUIInventoryCtrl::CheckSlot(int iColumnX, int iRowY, int width
     return CheckSlot(iIndex, width, height);
 }
 
+bool SEASON3B::CNewUIInventoryCtrl::IsRectEmpty(int startIndex, int width, int height) const
+{
+    const int gridSize = m_nColumn * m_nRow;
+    if (startIndex < 0 || width <= 0 || height <= 0) return false;
+    if (startIndex % m_nColumn > m_nColumn - width) return false;
+
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            const int iIndex = startIndex + (y * m_nColumn) + x;
+            if (iIndex >= gridSize) return false;
+            if (m_pdwItemCheckBox[iIndex] != 0) return false;
+        }
+    }
+    return true;
+}
+
+bool SEASON3B::CNewUIInventoryCtrl::CanFit(int width, int height) const
+{
+    if (width <= 0 || height <= 0) return false;
+    const int totalCells = m_nColumn * m_nRow;
+    for (int i = 0; i < totalCells; i++)
+    {
+        if (IsRectEmpty(i, width, height)) return true;
+    }
+    return false;
+}
+
 int CNewUIInventoryCtrl::GetIndex(int column, int row)
 {
     return column + row * m_nColumn + m_nIndexOffset;
