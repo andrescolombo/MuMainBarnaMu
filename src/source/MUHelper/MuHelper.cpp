@@ -24,6 +24,7 @@ constexpr int DEFAULT_DURABILITY_THRESHOLD = 50;
 constexpr float BASIC_ATTACK_DISTANCE = 1.5f;
 constexpr int MUHELPER_FULL_WORK_INTERVAL_MS = 250;
 constexpr int MUHELPER_FULL_WORK_TICKS = MUHELPER_FULL_WORK_INTERVAL_MS / MUHelper::MUHELPER_TIMER_INTERVAL_MS;
+constexpr DWORD OWN_DROP_TTL_MS = 5000;
 
 SpinLock _targetsLock;
 SpinLock _itemsLock;
@@ -1725,7 +1726,52 @@ namespace MUHelper
     {
         _itemsLock.lock();
         m_setItems.insert(iItemId);
+        if (ClaimOwnDropAt(posWhere.x, posWhere.y))
+        {
+            m_setSkippedItems.insert(iItemId);
+        }
         _itemsLock.unlock();
+    }
+
+    void CMuHelper::NoteOwnDrop(int tx, int ty)
+    {
+        const DWORD nowTick = GetTickCount();
+        _itemsLock.lock();
+
+        int oldestSlot = 0;
+        DWORD oldestTick = nowTick;
+        for (int i = 0; i < kMaxOwnDrops; i++)
+        {
+            const bool bExpired = (nowTick - m_aOwnDrops[i].tickRecorded) > OWN_DROP_TTL_MS;
+            if (m_aOwnDrops[i].x < 0 || bExpired)
+            {
+                m_aOwnDrops[i] = { tx, ty, nowTick };
+                _itemsLock.unlock();
+                return;
+            }
+            if (m_aOwnDrops[i].tickRecorded < oldestTick)
+            {
+                oldestTick = m_aOwnDrops[i].tickRecorded;
+                oldestSlot = i;
+            }
+        }
+
+        m_aOwnDrops[oldestSlot] = { tx, ty, nowTick };
+        _itemsLock.unlock();
+    }
+
+    bool CMuHelper::ClaimOwnDropAt(int tx, int ty)
+    {
+        const DWORD nowTick = GetTickCount();
+        for (int i = 0; i < kMaxOwnDrops; i++)
+        {
+            if (m_aOwnDrops[i].x < 0) continue;
+            if (m_aOwnDrops[i].x != tx || m_aOwnDrops[i].y != ty) continue;
+            if ((nowTick - m_aOwnDrops[i].tickRecorded) > OWN_DROP_TTL_MS) continue;
+            m_aOwnDrops[i] = {};
+            return true;
+        }
+        return false;
     }
 
     void CMuHelper::DeleteItem(int iItemId)

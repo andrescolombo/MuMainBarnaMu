@@ -24,6 +24,7 @@ extern bool SelectFlag;
 #include "GameLogic/Items/CSItemOption.h"
 #include "World/MapInfra/MapManager.h"
 #include "Network/Server/SocketSystem.h"
+#include "MUHelper/MuHelper.h"
 #include "World/MapInfra/PortalMgr.h"
 #ifdef CSK_FIX_BLUELUCKYBAG_MOVECOMMAND
 #include "GameLogic/Events/Event.h"
@@ -1014,12 +1015,14 @@ bool CNewUIMyInventory::UpdateMouseEvent()
                 {
                     SocketClient->ToGameServer()->SendDropItemRequest(tx, ty, iSourceIndex);
                     SendDropItem = iSourceIndex;
+                    MUHelper::g_MuHelper.NoteOwnDrop(tx, ty);
                 }
             }
             else if (pItemObj && pItemObj->ex_src_type == ITEM_EX_SRC_EQUIPMENT)
             {
                 SocketClient->ToGameServer()->SendDropItemRequest(tx, ty, iSourceIndex);
                 SendDropItem = iSourceIndex;
+                MUHelper::g_MuHelper.NoteOwnDrop(tx, ty);
             }
             MouseUpdateTime = 0;
             MouseUpdateTimeMax = 6;
