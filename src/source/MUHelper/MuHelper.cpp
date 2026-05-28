@@ -174,6 +174,7 @@ namespace MUHelper
         m_iObtainingDistance = ComputeDistanceByRange(m_config.iObtainingRange);
 
         m_iSecondsElapsed = 0;
+        m_iSecondsAway = 0;
         m_iElapsedMilliseconds = 0;
         m_iLastBuffTimerSecond = -1;
         m_mapLastBuffCastSecond.clear();
@@ -225,6 +226,15 @@ namespace MUHelper
         {
             m_iSecondsElapsed++;
             m_iElapsedMilliseconds -= 1000;
+
+            if (ComputeDistanceBetween({ Hero->PositionX, Hero->PositionY }, m_posOriginal) > 1)
+            {
+                m_iSecondsAway++;
+            }
+            else
+            {
+                m_iSecondsAway = 0;
+            }
         }
 
         if (++m_iLoopCounter >= MUHELPER_FULL_WORK_TICKS)
@@ -265,6 +275,11 @@ namespace MUHelper
             }
 
             if (!ObtainItem())
+            {
+                return;
+            }
+
+            if (!Regroup())
             {
                 return;
             }
