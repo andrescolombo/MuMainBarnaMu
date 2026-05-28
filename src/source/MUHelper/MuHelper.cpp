@@ -1611,7 +1611,6 @@ namespace MUHelper
                         {
                             SendGetItem = m_iCurrentItem;
                             SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
-                            GameLogic::Helper::SessionStats::RecordActivity();
                             DeleteItem(m_iCurrentItem);
                         }
                         return 1;
@@ -1655,7 +1654,6 @@ namespace MUHelper
                 {
                     SendGetItem = m_iCurrentItem;
                     SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
-                    GameLogic::Helper::SessionStats::RecordActivity();
                     DeleteItem(m_iCurrentItem);
                 }
             }
