@@ -943,6 +943,7 @@ void CNewUIMuHelper::ApplyConfigFromCheckbox(int iCheckboxId, bool bState)
 			cboxPickSelected.box->RegisterBoxState(false);
 		}
 		_TempConfig.bPickAllItems = bState;
+		_TempConfig.bPickSelectItems = false;
 		break;
 	}
 
@@ -954,6 +955,7 @@ void CNewUIMuHelper::ApplyConfigFromCheckbox(int iCheckboxId, bool bState)
 			cboxPickAll.box->RegisterBoxState(false);
 		}
 		_TempConfig.bPickSelectItems = bState;
+		_TempConfig.bPickAllItems = false;
 		break;
 	}
 
