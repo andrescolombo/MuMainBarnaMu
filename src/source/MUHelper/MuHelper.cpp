@@ -25,6 +25,7 @@ constexpr float BASIC_ATTACK_DISTANCE = 1.5f;
 constexpr int MUHELPER_FULL_WORK_INTERVAL_MS = 250;
 constexpr int MUHELPER_FULL_WORK_TICKS = MUHELPER_FULL_WORK_INTERVAL_MS / MUHelper::MUHELPER_TIMER_INTERVAL_MS;
 constexpr DWORD OWN_DROP_TTL_MS = 5000;
+constexpr int OWN_DROP_TILE_TOLERANCE = 1;
 
 SpinLock _targetsLock;
 SpinLock _itemsLock;
@@ -1766,7 +1767,10 @@ namespace MUHelper
         for (int i = 0; i < kMaxOwnDrops; i++)
         {
             if (m_aOwnDrops[i].x < 0) continue;
-            if (m_aOwnDrops[i].x != tx || m_aOwnDrops[i].y != ty) continue;
+            const int dx = m_aOwnDrops[i].x - tx;
+            const int dy = m_aOwnDrops[i].y - ty;
+            if (dx < -OWN_DROP_TILE_TOLERANCE || dx > OWN_DROP_TILE_TOLERANCE) continue;
+            if (dy < -OWN_DROP_TILE_TOLERANCE || dy > OWN_DROP_TILE_TOLERANCE) continue;
             if ((nowTick - m_aOwnDrops[i].tickRecorded) > OWN_DROP_TTL_MS) continue;
             m_aOwnDrops[i] = {};
             return true;
