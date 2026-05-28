@@ -110,6 +110,7 @@ namespace MUHelper
 		netData.ObtainRange = static_cast<BYTE>(gameData.iObtainingRange & 0x0F);
 		netData.DistanceMin = static_cast<WORD>(gameData.iMaxSecondsAway & 0xFFFF);
 		netData.LongDistanceAttack = gameData.bLongRangeCounterAttack ? 1 : 0;
+		netData.OriginalPosition = gameData.bReturnToOriginalPosition ? 1 : 0;
 
 		netData.RepairItem = gameData.bRepairItem ? 1 : 0;
 		netData.PickAllNearItems = gameData.bPickAllItems ? 1 : 0;
@@ -197,6 +198,7 @@ namespace MUHelper
 		gameData.iObtainingRange = static_cast<int>(netData.ObtainRange);
 		gameData.iMaxSecondsAway = static_cast<int>(netData.DistanceMin);
 		gameData.bLongRangeCounterAttack = (bool)netData.LongDistanceAttack;
+		gameData.bReturnToOriginalPosition = (bool)netData.OriginalPosition;
 
 		gameData.bUseDarkRaven = (bool)netData.UseDarkSpirits;
 		gameData.iDarkRavenMode = static_cast<int>(netData.PetAttack);
