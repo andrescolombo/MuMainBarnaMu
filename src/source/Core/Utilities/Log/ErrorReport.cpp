@@ -10,6 +10,14 @@
 #include <imagehlp.h>
 #include "ErrorReport.h"
 
+// Max UTF-8 bytes for a single log line. Source buffer is wchar_t[1024]; UTF-8 needs
+// up to 3 bytes per BMP character (and 4 bytes per surrogate pair), so a 1024-wchar
+// input expands to at most ~3072 bytes. 4096 gives comfortable margin.
+constexpr int MAX_LOG_LINE_BYTES = 4096;
+// Hex-dump line buffer. Output is pure ASCII (hex digits, spaces, colons, CRLF),
+// so 1 byte per source wchar is sufficient with margin.
+constexpr int MAX_HEX_LINE_BYTES = 512;
+
 void DeleteSocket();
 
 CErrorReport::CErrorReport()
@@ -50,7 +58,10 @@ void CErrorReport::Destroy(void)
 
 void CErrorReport::CutHead(void)
 {
-    // Log file is ANSI: one byte per character, so byte count == char count throughout.
+    // Log file is UTF-8. The "###### Log Begin ######" marker is pure ASCII, and UTF-8
+    // preserves ASCII bytes verbatim (no multi-byte sequence starts with a byte < 0x80),
+    // so byte-level strchr/strncmp on '#' reliably locates the marker even if other lines
+    // contain multi-byte sequences.
     DWORD dwNumber;
     char lpszBuffer[128 * 1024];
     ReadFile(m_hFile, lpszBuffer, sizeof(lpszBuffer) - 1, &dwNumber, NULL);
@@ -112,22 +123,24 @@ BOOL CErrorReport::WriteFile(HANDLE hFile, void* lpBuffer, DWORD nNumberOfBytesT
 
 void CErrorReport::WriteDebugInfoStr(wchar_t* lpszToWrite)
 {
-    if (m_hFile != INVALID_HANDLE_VALUE)
+    if (m_hFile == INVALID_HANDLE_VALUE) return;
+
+    // Convert UTF-16 wide string to UTF-8 before writing. UTF-8 is portable across
+    // locales (unlike CP_ACP, where the file's bytes depend on the writer's system
+    // codepage -- Shift-JIS on JP Windows, Windows-1252 on EN, etc. -- making logs
+    // collected from different machines ambiguous without knowing each user's locale).
+    char narrowBuf[MAX_LOG_LINE_BYTES];
+    int len = WideCharToMultiByte(CP_UTF8, 0, lpszToWrite, -1, narrowBuf, sizeof(narrowBuf), nullptr, nullptr);
+    // len includes the null terminator. 0 = conversion failed (e.g. ERROR_INSUFFICIENT_BUFFER);
+    // 1 = empty string (only null terminator). Either way, nothing to write.
+    if (len <= 1) return;
+
+    DWORD dwNumber;
+    WriteFile(m_hFile, narrowBuf, len - 1, &dwNumber, NULL);
+    if (dwNumber == 0)
     {
-        // Convert UTF-16 wide string to ANSI before writing so the log file is plain text,
-        // readable in any editor without encoding configuration. All log messages are ASCII-safe.
-        char narrowBuf[2048];
-        int len = WideCharToMultiByte(CP_ACP, 0, lpszToWrite, -1, narrowBuf, sizeof(narrowBuf), nullptr, nullptr);
-        if (len > 1)  // len includes the null terminator; > 1 means there is actual content
-        {
-            DWORD dwNumber;
-            WriteFile(m_hFile, narrowBuf, len - 1, &dwNumber, NULL);
-            if (dwNumber == 0)
-            {
-                CloseHandle(m_hFile);
-                Create(m_lpszFileName);
-            }
-        }
+        CloseHandle(m_hFile);
+        Create(m_lpszFileName);
     }
 }
 
@@ -146,15 +159,16 @@ void CErrorReport::HexWrite(void* pBuffer, int iSize)
 {
     DWORD dwWritten = 0;
     wchar_t szLine[256] = { 0, };
-    char narrowLine[512];
+    char narrowLine[MAX_HEX_LINE_BYTES];
     int offset = 0;
+    int len = 0;
     offset += mu_swprintf(szLine, L"0x%00000008X : ", (DWORD*)pBuffer);
     for (int i = 0; i < iSize; i++) {
         offset += mu_swprintf(szLine + offset, L"%02X", *((BYTE*)pBuffer + i));
         if (i > 0 && i < iSize - 1) {
             if (i % 16 == 15) {	//. new line
                 offset += mu_swprintf(szLine + offset, L"\r\n");
-                int len = WideCharToMultiByte(CP_ACP, 0, szLine, -1, narrowLine, sizeof(narrowLine), nullptr, nullptr);
+                len = WideCharToMultiByte(CP_UTF8, 0, szLine, -1, narrowLine, sizeof(narrowLine), nullptr, nullptr);
                 if (len > 1) WriteFile(m_hFile, narrowLine, len - 1, &dwWritten, NULL);
                 offset = 0;
                 offset += mu_swprintf(szLine + offset, L"           : ");
@@ -165,7 +179,7 @@ void CErrorReport::HexWrite(void* pBuffer, int iSize)
         }
     }
     offset += mu_swprintf(szLine + offset, L"\r\n");
-    int len = WideCharToMultiByte(CP_ACP, 0, szLine, -1, narrowLine, sizeof(narrowLine), nullptr, nullptr);
+    len = WideCharToMultiByte(CP_UTF8, 0, szLine, -1, narrowLine, sizeof(narrowLine), nullptr, nullptr);
     if (len > 1) WriteFile(m_hFile, narrowLine, len - 1, &dwWritten, NULL);
 }
 
