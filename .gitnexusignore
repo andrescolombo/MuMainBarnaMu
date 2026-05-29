@@ -1,0 +1,33 @@
+# Build outputs and fetched dependencies
+build/
+build-mingw/
+_deps/
+**/cmake-build-debug/
+**/cmake-build-release/
+**/CMakeFiles/
+Win32/
+.vs/
+.nuget/
+
+# Vendored third-party trees (SDL, imgui, etc.)
+src/ThirdParty/
+src/dependencies/
+
+# Generated/native build outputs
+src/bin/
+
+# Large generated or legacy monolith files that currently stall GitNexus workers.
+ClientLibrary/ConnectionManager.*Functions.cs
+src/source/Dotnet/PacketFunctions_ClientToServer.h
+src/source/Core/Globals/_enum.h
+tests/third_party/
+
+# .NET build artifacts
+**/bin/
+**/obj/
+
+# IDE and local-only paths
+**/.idea/
+docs/reviews/
+graphify-out/
+_local/
