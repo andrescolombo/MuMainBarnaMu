@@ -27,6 +27,9 @@ build-mingw/
 **/bin/**
 !**/bin/Translations/
 !**/bin/Translations/**
+!src/bin/glew32.dll
+!src/bin/ogg.dll
+!src/bin/vorbisfile.dll
 **/obj/
 *.user
 *.suo
